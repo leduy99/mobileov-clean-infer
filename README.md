@@ -9,6 +9,10 @@ It is intentionally separated from the main training repo so we can run simple,
 repeatable inference commands without mixing them with training scripts,
 manifests, or experiment notes.
 
+Architecture overview:
+
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+
 ## Design
 
 This repo keeps the user-facing interface clean, while reusing the tested model
