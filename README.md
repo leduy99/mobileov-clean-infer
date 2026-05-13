@@ -32,6 +32,36 @@ On the H200 machine, all GPU work must go through SLURM.
 
 Do **not** run CUDA Python directly from a normal SSH shell.
 
+## Environment
+
+The clean repo is intentionally lightweight. It assumes you reuse the working
+inference environment from the main project instead of creating a brand new
+standalone environment here.
+
+Recommended environment:
+
+```bash
+source /share_0/conda/etc/profile.d/conda.sh
+conda activate mobileov
+```
+
+The `mobileov_onepass_20260401` environment was only a temporary reinstall /
+validation environment during testing. The clean repo should document and use
+`mobileov` as the intended default environment.
+
+One-time extra dependency for SmolVLM2 multimodal understanding:
+
+```bash
+python -m pip install num2words
+```
+
+Quick sanity checks:
+
+```bash
+python -m mobileov_infer.generate --help
+python -m mobileov_infer.understand --help
+```
+
 ## Quick start
 
 From this repo:
@@ -45,6 +75,8 @@ That requests one debug GPU and opens a `tmux` session inside the allocation.
 Inside that tmux session, you can run:
 
 ```bash
+source /share_0/conda/etc/profile.d/conda.sh
+conda activate mobileov
 bash scripts/smoke_test.sh
 ```
 
@@ -52,6 +84,12 @@ The smoke test:
 
 1. generates one short video
 2. runs SmolVLM2 understanding on that video
+
+Current smoke-test defaults:
+
+- generation steps: `24`
+- cfg scale: `6.0`
+- generation frames: `17`
 
 Outputs go to:
 
@@ -69,6 +107,13 @@ bash scripts/generate.sh \
   --num-frames 81 \
   --output-dir output/demo_generation
 ```
+
+Default generation settings in the clean repo:
+
+- steps: `24`
+- cfg scale: `6.0`
+- seed: `0`
+- dtype: `bf16`
 
 Useful overrides:
 

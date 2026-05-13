@@ -12,15 +12,18 @@ UNDERSTAND_TXT="${OUT_DIR}/understanding.txt"
 
 PROMPT=${PROMPT:-"a golden retriever running along a beach at sunset"}
 QUESTION=${QUESTION:-"Describe the video in 2-3 sentences."}
+STEPS=${STEPS:-24}
+CFG_SCALE=${CFG_SCALE:-6.0}
+NUM_FRAMES=${NUM_FRAMES:-17}
 
 mkdir -p "$GENERATED_DIR"
 
 python -m mobileov_infer.generate \
   --prompt "$PROMPT" \
   --output-dir "$GENERATED_DIR" \
-  --num-frames 17 \
-  --steps 8 \
-  --cfg-scale 6.0 \
+  --num-frames "$NUM_FRAMES" \
+  --steps "$STEPS" \
+  --cfg-scale "$CFG_SCALE" \
   --seed 0
 
 VIDEO_PATH=$(ls -1t "$GENERATED_DIR"/*.mp4 | head -n 1)
