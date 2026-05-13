@@ -1,6 +1,7 @@
-output/
 __pycache__/
 *.pyc
 *.pyo
-*.swp
-.DS_Store
+.pytest_cache/
+
+output/
+omni_ckpts/

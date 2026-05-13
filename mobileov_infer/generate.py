@@ -2,12 +2,9 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
-from pathlib import Path
 
 from .common import (
     default_generation_ckpt,
-    resolve_backend_repo,
     resolve_path,
     run_backend_python,
 )
@@ -15,12 +12,35 @@ from .common import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Clean Mobile-OV generation wrapper")
-    parser.add_argument("--backend-repo", type=str, default=None, help="Path to Omni-Video-smolvlm2 repo")
     parser.add_argument(
         "--checkpoint",
         type=str,
         default=None,
-        help="Generation checkpoint (.pt). Defaults to MOBILEOV_GENERATION_CKPT or the 60k joint checkpoint.",
+        help="Generation checkpoint (.pt). Defaults to MOBILEOV_GENERATION_CKPT or the local 60k joint checkpoint.",
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        type=str,
+        default=os.environ.get("MOBILEOV_SANA_CHECKPOINT_DIR", "omni_ckpts/sana_video_2b_480p"),
+        help="Local SANA checkpoint directory",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=os.environ.get("MOBILEOV_SANA_CONFIG", "configs/sana_video_config/Sana_2000M_480px_AdamW_fsdp.yaml"),
+        help="SANA config path",
+    )
+    parser.add_argument(
+        "--smolvlm2-ckpt-path",
+        type=str,
+        default=os.environ.get("SMOLVLM2_CKPT_PATH", "omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt"),
+        help="SmolVLM2 checkpoint path",
+    )
+    parser.add_argument(
+        "--tokenizer-model-id",
+        type=str,
+        default=os.environ.get("SMOLVLM2_TOKENIZER_MODEL_ID", "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"),
+        help="Tokenizer/model id for the bridge text path",
     )
     parser.add_argument("--prompt", type=str, required=True, help="Prompt text")
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save outputs")
@@ -42,10 +62,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    backend_repo = resolve_backend_repo(args.backend_repo)
-
     ckpt_raw = args.checkpoint or os.environ.get("MOBILEOV_GENERATION_CKPT")
-    checkpoint = resolve_path(ckpt_raw) if ckpt_raw else default_generation_ckpt(backend_repo).resolve()
+    checkpoint = resolve_path(ckpt_raw) if ckpt_raw else default_generation_ckpt().resolve()
     output_dir = resolve_path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +73,14 @@ def main() -> int:
     backend_args = [
         "--bridge-ckpt",
         str(checkpoint),
+        "--checkpoint-dir",
+        args.checkpoint_dir,
+        "--config",
+        args.config,
+        "--smolvlm2-ckpt-path",
+        args.smolvlm2_ckpt_path,
+        "--tokenizer-model-id",
+        args.tokenizer_model_id,
         "--prompt",
         args.prompt,
         "--output-dir",
@@ -88,7 +114,6 @@ def main() -> int:
         backend_args.append("--use-chi-prompt")
 
     return run_backend_python(
-        backend_repo=backend_repo,
         script_relpath="tools/inference/test_q1_student_video.py",
         argv=backend_args,
     )

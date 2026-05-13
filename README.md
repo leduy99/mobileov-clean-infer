@@ -1,34 +1,23 @@
 # Mobile-OV Infer Clean
 
-This repository is a clean inference frontend for:
+This repository is a self-contained inference repo for:
 
 - video and image generation
 - image and video understanding
 
 It is intentionally separated from the main training repo so we can run simple,
 repeatable inference commands without mixing them with training scripts,
-manifests, or experiment notes.
+manifests, or experiment notes. Unlike the first thin-wrapper version, this
+repo now vendors the Mobile-OV generation stack locally so it does not need a
+second sibling checkout to run.
 
 Architecture overview:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 
-## Design
-
-This repo keeps the user-facing interface clean, while reusing the tested model
-backend from the sibling repository:
-
-- backend repo: `../Omni-Video-smolvlm2`
-
-That means we do **not** duplicate the full SANA code here. We only
-wrap the tested generation entrypoint from the backend repo:
-
-- generation backend:
-  `tools/inference/test_q1_student_video.py`
-
-For understanding, this clean repo now uses the Hugging Face
+For understanding, this repo uses the Hugging Face
 `HuggingFaceTB/SmolVLM2-500M-Video-Instruct` model directly, so that video
-understanding stays simple and independent from backend research utilities.
+understanding stays simple and independent from the custom generation path.
 
 ## Important cluster rule
 
@@ -38,9 +27,8 @@ Do **not** run CUDA Python directly from a normal SSH shell.
 
 ## Environment
 
-The clean repo is intentionally lightweight. It assumes you reuse the working
-inference environment from the main project instead of creating a brand new
-standalone environment here.
+This repo assumes you reuse the working Mobile-OV inference environment instead
+of building a separate clean-room environment just for the wrapper.
 
 Recommended environment:
 
@@ -48,10 +36,6 @@ Recommended environment:
 source /share_0/conda/etc/profile.d/conda.sh
 conda activate mobileov
 ```
-
-The `mobileov_onepass_20260401` environment was only a temporary reinstall /
-validation environment during testing. The clean repo should document and use
-`mobileov` as the intended default environment.
 
 One-time extra dependency for SmolVLM2 multimodal understanding:
 
@@ -64,6 +48,14 @@ Quick sanity checks:
 ```bash
 python -m mobileov_infer.generate --help
 python -m mobileov_infer.understand --help
+```
+
+Optional local code sanity check:
+
+```bash
+python -m py_compile \
+  mobileov_infer/*.py \
+  tools/inference/*.py
 ```
 
 ## Quick start
@@ -134,7 +126,7 @@ bash scripts/generate.sh \
 Default generation checkpoint:
 
 ```bash
-../Omni-Video-smolvlm2/omni_ckpts/hf_mobile_ov/stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt
+omni_ckpts/hf_mobile_ov/stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt
 ```
 
 You can override it with:
@@ -142,6 +134,22 @@ You can override it with:
 ```bash
 export MOBILEOV_GENERATION_CKPT=/abs/path/to/another_checkpoint.pt
 ```
+
+Expected local checkpoint layout for the default generation path:
+
+```text
+omni_ckpts/
+  hf_mobile_ov/
+    stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt
+  sana_video_2b_480p/
+    checkpoints/SANA_Video_2B_480p.pth
+    vae/Wan2.1_VAE.pth
+  smolvlm2_500m/
+    smolvlm2_500m.pt
+```
+
+If you keep checkpoints elsewhere, pass `--checkpoint` or set
+`MOBILEOV_GENERATION_CKPT`.
 
 ## Understanding
 
@@ -184,10 +192,7 @@ python -m pip install num2words
 
 - Run this repo from a shared filesystem path such as `/share_X/users/$USER`.
 - The wrappers automatically set `PYTHONNOUSERSITE=1`.
-- The wrappers automatically set `PYTHONPATH` to the backend repo before
-  invoking the generation backend code.
-- If your backend repo is not the sibling `../Omni-Video-smolvlm2`, set:
-
-```bash
-export MOBILEOV_BACKEND_REPO=/abs/path/to/Omni-Video-smolvlm2
-```
+- The wrappers automatically set `PYTHONPATH` to this repo root before
+  invoking the local generation backend code.
+- The repo is self-contained at the code level, but it still expects model
+  checkpoints to exist locally or be passed by path.
