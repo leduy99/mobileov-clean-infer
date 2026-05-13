@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+from .common import (
+    default_generation_ckpt,
+    resolve_backend_repo,
+    resolve_path,
+    run_backend_python,
+)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Clean Mobile-OV generation wrapper")
+    parser.add_argument("--backend-repo", type=str, default=None, help="Path to Omni-Video-smolvlm2 repo")
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Generation checkpoint (.pt). Defaults to MOBILEOV_GENERATION_CKPT or the 60k joint checkpoint.",
+    )
+    parser.add_argument("--prompt", type=str, required=True, help="Prompt text")
+    parser.add_argument("--output-dir", type=str, required=True, help="Directory to save outputs")
+    parser.add_argument("--num-frames", type=int, default=81, help="Number of frames")
+    parser.add_argument("--height", type=int, default=480, help="Output height")
+    parser.add_argument("--width", type=int, default=832, help="Output width")
+    parser.add_argument("--steps", type=int, default=24, help="Sampling steps")
+    parser.add_argument("--cfg-scale", type=float, default=6.0, help="CFG scale")
+    parser.add_argument("--seed", type=int, default=0, help="Random seed")
+    parser.add_argument("--device", type=str, default="cuda:0", help="Torch device")
+    parser.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp32"], help="Inference dtype")
+    parser.add_argument("--negative-prompt", type=str, default="", help="Negative prompt")
+    parser.add_argument("--sana-backend", type=str, default="fixed", choices=["fixed", "legacy"], help="SANA backend")
+    parser.add_argument("--sampling-algo", type=str, default=None, help="Optional sampling override")
+    parser.add_argument("--motion-score", type=int, default=10, help="Motion score appended by backend")
+    parser.add_argument("--use-chi-prompt", action="store_true", help="Enable CHI prompt mode")
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    backend_repo = resolve_backend_repo(args.backend_repo)
+
+    ckpt_raw = args.checkpoint or os.environ.get("MOBILEOV_GENERATION_CKPT")
+    checkpoint = resolve_path(ckpt_raw) if ckpt_raw else default_generation_ckpt(backend_repo).resolve()
+    output_dir = resolve_path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"Generation checkpoint not found: {checkpoint}")
+
+    backend_args = [
+        "--bridge-ckpt",
+        str(checkpoint),
+        "--prompt",
+        args.prompt,
+        "--output-dir",
+        str(output_dir),
+        "--num-frames",
+        str(args.num_frames),
+        "--height",
+        str(args.height),
+        "--width",
+        str(args.width),
+        "--steps",
+        str(args.steps),
+        "--cfg-scale",
+        str(args.cfg_scale),
+        "--seed",
+        str(args.seed),
+        "--device",
+        args.device,
+        "--dtype",
+        args.dtype,
+        "--negative-prompt",
+        args.negative_prompt,
+        "--sana-backend",
+        args.sana_backend,
+        "--motion-score",
+        str(args.motion_score),
+    ]
+    if args.sampling_algo:
+        backend_args.extend(["--sampling-algo", args.sampling_algo])
+    if args.use_chi_prompt:
+        backend_args.append("--use-chi-prompt")
+
+    return run_backend_python(
+        backend_repo=backend_repo,
+        script_relpath="tools/inference/test_q1_student_video.py",
+        argv=backend_args,
+    )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
