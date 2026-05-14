@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-SANA-video inference script - rewritten following SANA repo structure and patterns.
+Video diffusion backbone runtime.
 
-This script follows the proper SANA inference pipeline:
+This script follows the upstream backbone inference pipeline:
 - Uses config to load models
-- Properly formats inputs for SANA model (x: [B,C,T,H,W], timestep, y: text embeddings)
+- Properly formats inputs for the diffusion model (x: [B,C,T,H,W], timestep, y: text embeddings)
 - Implements flow matching sampling with CFG support
 - Uses VAE decode properly
 
 Usage:
-    python sana_video_runtime.py \
+    python video_backbone_runtime.py \
         --prompt "a cat playing with a wool beside the fireside" \
-        --output_dir output/sana_inference \
+        --output_dir output/video_backbone_inference \
         --checkpoint_dir omni_ckpts/sana_video_2b_480p
 """
 
@@ -20,9 +20,9 @@ import os
 # Add project root to path
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, project_root)
-_sana_repo_root = os.path.join(project_root, "nets", "third_party", "sana")
-if os.path.isdir(_sana_repo_root):
-    sys.path.insert(0, _sana_repo_root)
+_video_backbone_repo_root = os.path.join(project_root, "nets", "third_party", "video_backbone")
+if os.path.isdir(_video_backbone_repo_root):
+    sys.path.insert(0, _video_backbone_repo_root)
 
 import argparse
 import logging
@@ -73,7 +73,7 @@ except ImportError:
     CV2_AVAILABLE = False
     cv2 = None
 
-# SANA imports
+# Vendored backbone imports
 from diffusion.model.builder import (
     build_model,
     get_tokenizer_and_text_encoder,
@@ -83,7 +83,7 @@ from diffusion.model.builder import (
 )
 from diffusion.utils.config import SanaVideoConfig
 from diffusion.model.utils import get_weight_dtype
-from diffusion.data.datasets import utils as sana_dataset_utils
+from diffusion.data.datasets import utils as backbone_dataset_utils
 from diffusion.model.utils import prepare_prompt_ar
 
 
@@ -108,7 +108,7 @@ def get_base_ratios(config, height, width):
         ratio_name = f"ASPECT_RATIO_VIDEO_{image_size}_TEST_DIV32"
     else:
         ratio_name = f"ASPECT_RATIO_VIDEO_{image_size}_TEST"
-    base_ratios = getattr(sana_dataset_utils, ratio_name, None)
+    base_ratios = getattr(backbone_dataset_utils, ratio_name, None)
     if base_ratios is None:
         base_ratios = {f"{height/width:.2f}": [float(height), float(width)]}
     return base_ratios
@@ -152,8 +152,8 @@ def download_checkpoint(hf_model_id="Efficient-Large-Model/SANA-Video_2B_480p",
         raise
 
 
-def load_config_file(config_path="configs/sana_video_2000M_480px.yaml"):
-    """Load SANA-video config file."""
+def load_config_file(config_path="configs/video_backbone_config/Sana_2000M_480px_AdamW_fsdp.yaml"):
+    """Load video-backbone config file."""
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
@@ -172,7 +172,7 @@ def load_config_file(config_path="configs/sana_video_2000M_480px.yaml"):
         return config
 
 
-def load_sana_models(
+def load_backbone_models(
     config,
     checkpoint_dir="omni_ckpts/sana_video_2b_480p",
     device="cuda:0",
@@ -181,9 +181,9 @@ def load_sana_models(
     latent_size=32,
     load_text_encoder=True,
 ):
-    """Load SANA-video model, VAE, and text encoder following SANA patterns."""
+    """Load backbone model, VAE, and text encoder following the upstream runtime layout."""
     print("=" * 80)
-    print("Loading SANA-video models...")
+    print("Loading video-backbone models...")
     print("=" * 80)
     
     # 1. Load text encoder (optional for student-bridge inference path)
@@ -312,7 +312,7 @@ def load_sana_models(
 
 @torch.no_grad()
 def encode_text(tokenizer, text_encoder, prompt, config, device="cuda:0", use_chi_prompt=True):
-    """Encode text prompt to embeddings following SANA format exactly."""
+    """Encode text prompt to embeddings following the upstream backbone format."""
     if tokenizer is None:
         # For Qwen2.5-VL
         assert hasattr(text_encoder, 'encode_text')
@@ -352,7 +352,7 @@ def encode_text(tokenizer, text_encoder, prompt, config, device="cuda:0", use_ch
 
 @torch.no_grad()
 def encode_negative_prompt(tokenizer, text_encoder, negative_prompt, config, device="cuda:0"):
-    """Encode negative prompt to embeddings following SANA format."""
+    """Encode negative prompt to embeddings following the upstream backbone format."""
     if tokenizer is None:
         assert hasattr(text_encoder, 'encode_text')
         y = text_encoder.encode_text([negative_prompt], device=device)
@@ -403,7 +403,7 @@ def flow_matching_sampling(
 
     if sampling_algo == "flow_dpm-solver":
         if not SANA_DPM_AVAILABLE:
-            raise RuntimeError("SANA DPMS sampler is not available; cannot run flow_dpm-solver.")
+            raise RuntimeError("Backbone DPMS sampler is not available; cannot run flow_dpm-solver.")
         dpm_solver = DPMS(
             model,
             condition=text_embeddings,
@@ -486,7 +486,7 @@ def generate_video(
     high_motion=False,
     use_chi_prompt=True,
 ):
-    """Generate video from text prompt following SANA patterns."""
+    """Generate video from text prompt following the upstream backbone patterns."""
     print("=" * 80)
     print(f"Generating video from prompt: {prompt}")
     print(f"Resolution: {width}x{height}, Frames: {num_frames}")
@@ -560,7 +560,7 @@ def generate_video(
     print(f"✅ Text embeddings shape: {text_embeddings.shape}, emb_masks shape: {emb_masks_shape}")
     
     # Prepare latent shape
-    # SANA calculates latent_size_t correctly: int(num_frames - 1) // vae_stride[0] + 1
+    # The upstream backbone calculates latent_size_t as int(num_frames - 1) // vae_stride[0] + 1
     vae_latent_dim = config.vae.vae_latent_dim
     vae_downsample_rate = config.vae.vae_downsample_rate
     vae_stride = getattr(config.vae, 'vae_stride', [1, vae_downsample_rate, vae_downsample_rate])
@@ -571,7 +571,7 @@ def generate_video(
     
     latent_h = height // vae_downsample_rate
     latent_w = width // vae_downsample_rate
-    # Calculate latent_size_t like SANA gốc
+    # Calculate latent_size_t using the upstream backbone rule.
     latent_size_t = int(num_frames - 1) // vae_stride_t + 1
     latent_shape = (1, vae_latent_dim, latent_size_t, latent_h, latent_w)
     print(f"\n[2/4] Latent shape: {latent_shape} (num_frames={num_frames}, vae_stride_t={vae_stride_t}, latent_size_t={latent_size_t})")
@@ -579,7 +579,7 @@ def generate_video(
     # Sample from diffusion model
     print("\n[3/4] Running diffusion sampling...")
 
-    # Prepare hw (height, width) like SANA gốc
+    # Prepare hw (height, width) using the upstream backbone rule.
     hw = torch.tensor([[height, width]], dtype=torch.float, device=device)
     
     model_kwargs = {
@@ -662,16 +662,16 @@ def extract_frames(video, output_dir, prefix="frame"):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SANA-video inference (following SANA repo patterns)")
+    parser = argparse.ArgumentParser(description="Video backbone inference (following upstream repo patterns)")
     parser.add_argument("--prompt", type=str, required=True,
                        help="Text prompt for video generation")
     parser.add_argument("--use_chi_prompt", action="store_true",
                        help="Force-enable CHI prompt prefix in text encoding")
     parser.add_argument("--disable_chi_prompt", action="store_true",
                        help="Force-disable CHI prompt prefix in text encoding")
-    parser.add_argument("--output_dir", type=str, default="output/sana_inference",
+    parser.add_argument("--output_dir", type=str, default="output/video_backbone_inference",
                        help="Output directory")
-    parser.add_argument("--config", type=str, default="configs/sana_video_2000M_480px.yaml",
+    parser.add_argument("--config", type=str, default="configs/video_backbone_config/Sana_2000M_480px_AdamW_fsdp.yaml",
                        help="Path to config file")
     parser.add_argument("--checkpoint_dir", type=str, default="omni_ckpts/sana_video_2b_480p",
                        help="Local checkpoint directory")
@@ -690,7 +690,7 @@ def main():
     parser.add_argument("--sampling_algo", type=str, default=None,
                        help="Sampling algorithm: flow_euler or flow_dpm-solver")
     parser.add_argument("--negative_prompt", type=str, default=None,
-                       help="Negative prompt for CFG (defaults to SANA preset)")
+                       help="Negative prompt for CFG (defaults to the upstream preset)")
     parser.add_argument("--motion_score", type=int, default=10,
                        help="Motion score to append to prompt (<=0 to use high/low motion)")
     parser.add_argument("--high_motion", action="store_true",
@@ -740,7 +740,7 @@ def main():
 
     set_env(args.seed, getattr(config.model, "image_size", args.height) // config.vae.vae_downsample_rate)
     
-    models = load_sana_models(
+    models = load_backbone_models(
         config,
         checkpoint_dir=args.checkpoint_dir,
         device=str(device),
@@ -749,7 +749,7 @@ def main():
         latent_size=latent_size,
     )
 
-    sana_default_negative = (
+    backbone_default_negative = (
         "A chaotic sequence with misshapen, deformed limbs in heavy motion blur, sudden disappearance, "
         "jump cuts, jerky movements, rapid shot changes, frames out of sync, inconsistent character shapes, "
         "temporal artifacts, jitter, and ghosting effects, creating a disorienting visual experience."
@@ -757,7 +757,7 @@ def main():
     if args.negative_prompt is not None:
         negative_prompt = args.negative_prompt
     else:
-        negative_prompt = getattr(config, "negative_prompt", "") or sana_default_negative
+        negative_prompt = getattr(config, "negative_prompt", "") or backbone_default_negative
 
     sampling_algo = args.sampling_algo or getattr(config.scheduler, "vis_sampler", "flow_euler")
     if args.use_chi_prompt:

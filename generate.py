@@ -35,8 +35,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default=os.environ.get("MOBILEOV_SANA_CHECKPOINT_DIR", "omni_ckpts/sana_video_2b_480p"),
-        help="Local SANA checkpoint directory.",
+        default=os.environ.get("MOBILEOV_BACKBONE_CHECKPOINT_DIR", os.environ.get("MOBILEOV_SANA_CHECKPOINT_DIR", "omni_ckpts/sana_video_2b_480p")),
+        help="Local video backbone checkpoint directory.",
     )
     parser.add_argument(
         "--smolvlm2-ckpt-path",

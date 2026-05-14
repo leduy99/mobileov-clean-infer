@@ -17,7 +17,7 @@ engineer can:
 
 The clean repo therefore makes a few strong choices:
 
-- one active generation path: **SmolVLM2 -> lexical-gated Mobile-OV bridge -> SANA-video**
+- one active generation path: **SmolVLM2 -> lexical-gated Mobile-OV bridge -> video diffusion backbone**
 - one active understanding path: **local SmolVLM2 PyTorch model**
 - no sibling-repo dependency
 - no `python -m mobileov_infer...` wrapper package
@@ -91,7 +91,7 @@ live elsewhere, override them explicitly:
 
 ```bash
 CHECKPOINT=/abs/path/to/mobileov.pt \
-SANA_CHECKPOINT_DIR=/abs/path/to/sana_video_2b_480p \
+VIDEO_BACKBONE_CHECKPOINT_DIR=/abs/path/to/sana_video_2b_480p \
 SMOLVLM2_CKPT_PATH=/abs/path/to/smolvlm2_500m.pt \
 bash scripts/smoke_test.sh
 ```
@@ -108,7 +108,7 @@ This repo supports one generation architecture only:
 
 - Mobile-OV lexical-gated bridge
 - SmolVLM2-500M text path
-- SANA-video 2B 480p base model
+- video diffusion backbone base model
 - full DiT delta loaded from the Mobile-OV checkpoint
 
 That means the generation backend is intentionally **not** a general experiment
@@ -219,11 +219,11 @@ If you only want to understand the repo, start here:
 - `generate.py`
 - `understand.py`
 - `tools/inference/mobile_ov_generate.py`
-- `tools/inference/sana_video_runtime.py`
+- `tools/inference/video_backbone_runtime.py`
 - `nets/mobile_ov/mobile_ov_bridge.py`
 - `nets/mobile_ov/adapter.py`
 - `nets/mobile_ov/smolvlm2_vision_head.py`
 - `nets/smolvlm2/`
 
 Everything else exists only because the active path still needs it at runtime,
-most notably the vendored SANA diffusion stack under `nets/third_party/sana/`.
+most notably the vendored video diffusion stack under `nets/third_party/video_backbone/`.

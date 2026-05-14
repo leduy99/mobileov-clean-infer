@@ -6,7 +6,7 @@ This file intentionally supports one architecture only:
 
 SmolVLM2 text encoder
 -> lexical-gated MCP bridge
--> SANA-video 2B 480p backbone
+-> video diffusion backbone
 -> full DiT delta from the Mobile-OV checkpoint
 
 It is written for readability, not experiment coverage.
@@ -26,19 +26,19 @@ import torch
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-SANA_REPO_ROOT = os.path.join(PROJECT_ROOT, "nets", "third_party", "sana")
-if os.path.isdir(SANA_REPO_ROOT) and SANA_REPO_ROOT not in sys.path:
-    sys.path.insert(0, SANA_REPO_ROOT)
+VIDEO_BACKBONE_REPO_ROOT = os.path.join(PROJECT_ROOT, "nets", "third_party", "video_backbone")
+if os.path.isdir(VIDEO_BACKBONE_REPO_ROOT) and VIDEO_BACKBONE_REPO_ROOT not in sys.path:
+    sys.path.insert(0, VIDEO_BACKBONE_REPO_ROOT)
 
-from diffusion.data.datasets import utils as sana_dataset_utils
+from diffusion.data.datasets import utils as backbone_dataset_utils
 from diffusion.model.utils import prepare_prompt_ar
 from nets.mobile_ov import MobileOVBridge
 
 
-def _load_sana_runtime():
-    from tools.inference import sana_video_runtime
+def _load_video_backbone_runtime():
+    from tools.inference import video_backbone_runtime
 
-    return sana_video_runtime
+    return video_backbone_runtime
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class MobileOVSpec:
 
 SPEC = MobileOVSpec()
 TOKENIZER_MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-SANA_CONFIG_PATH = "configs/sana_video_config/Sana_2000M_480px_AdamW_fsdp.yaml"
+VIDEO_BACKBONE_CONFIG_PATH = "configs/video_backbone_config/Sana_2000M_480px_AdamW_fsdp.yaml"
 
 
 def _get_base_ratios(config, height: int, width: int):
@@ -83,7 +83,7 @@ def _get_base_ratios(config, height: int, width: int):
         ratio_name = f"ASPECT_RATIO_VIDEO_{image_size}_TEST_DIV32"
     else:
         ratio_name = f"ASPECT_RATIO_VIDEO_{image_size}_TEST"
-    base_ratios = getattr(sana_dataset_utils, ratio_name, None)
+    base_ratios = getattr(backbone_dataset_utils, ratio_name, None)
     if base_ratios is None:
         base_ratios = {f"{height / width:.2f}": [float(height), float(width)]}
     return base_ratios
@@ -297,7 +297,7 @@ def main(argv=None):
     args = parse_args(argv)
     device = torch.device(args.device)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    runtime = _load_sana_runtime()
+    runtime = _load_video_backbone_runtime()
 
     student_state, dit_state = _load_checkpoint_bundle(args.bridge_ckpt)
     projector_state = student_state["projector"]
@@ -315,12 +315,12 @@ def main(argv=None):
     )
     print("Checkpoint contract validated for the clean single-path Mobile-OV runtime.")
 
-    config = runtime.load_config_file(SANA_CONFIG_PATH)
+    config = runtime.load_config_file(VIDEO_BACKBONE_CONFIG_PATH)
     if not os.path.exists(args.checkpoint_dir) and hasattr(runtime, "download_checkpoint"):
         runtime.download_checkpoint(local_dir=args.checkpoint_dir)
 
     latent_size = args.height // config.vae.vae_downsample_rate
-    models = runtime.load_sana_models(
+    models = runtime.load_backbone_models(
         config=config,
         checkpoint_dir=args.checkpoint_dir,
         device=str(device),

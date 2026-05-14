@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 """
-Functions for downloading pre-trained Sana models
+Functions for downloading pre-trained video-backbone checkpoints.
 """
 import argparse
 import os
@@ -23,7 +23,7 @@ import torch
 from termcolor import colored
 from torchvision.datasets.utils import download_url
 
-from sana.tools import hf_download_or_fpath
+from video_backbone_support.tools import hf_download_or_fpath
 
 pretrained_models = {}
 
@@ -35,11 +35,11 @@ def find_model(model_name):
     if model_name in pretrained_models:  # Find/download our pre-trained G.pt checkpoints
         return download_model(model_name)
 
-    # Load a custom Sana checkpoint:
-    print(colored(f"[Sana] Loading model from {model_name}", attrs=["bold"]))
+    # Load a custom backbone checkpoint:
+    print(colored(f"[VideoBackbone] Loading model from {model_name}", attrs=["bold"]))
     model_name = hf_download_or_fpath(model_name)
-    assert os.path.isfile(model_name), f"Could not find Sana checkpoint at {model_name}"
-    print(colored(f"[Sana] Loaded model from {model_name}", attrs=["bold"]))
+    assert os.path.isfile(model_name), f"Could not find backbone checkpoint at {model_name}"
+    print(colored(f"[VideoBackbone] Loaded model from {model_name}", attrs=["bold"]))
     if model_name.endswith(".safetensors"):
         import safetensors
 
@@ -63,7 +63,7 @@ def find_model(model_name):
 
 def download_model(model_name):
     """
-    Downloads a pre-trained Sana model from the web.
+    Downloads a pre-trained video-backbone model from the web.
     """
     assert model_name in pretrained_models
     local_path = f"output/pretrained_models/{model_name}"
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     model_names = args.model_names
     model_names = set(model_names)
 
-    # Download Sana checkpoints
+    # Download video-backbone checkpoints
     for model in model_names:
         download_model(model)
     print("Done.")

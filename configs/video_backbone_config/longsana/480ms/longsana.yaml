@@ -1,6 +1,6 @@
-sana_config: configs/sana_video_config/Sana_2000M_480px_adamW_fsdp_longsana.yaml
-sana_fake_config: configs/sana_video_config/Sana_2000M_480px_AdamW_fsdp.yaml
-sana_inference_config: configs/sana_video_config/Sana_2000M_480px_adamW_fsdp_longsana.yaml
+sana_config: configs/video_backbone_config/Sana_2000M_480px_adamW_fsdp_longsana.yaml
+sana_fake_config: configs/video_backbone_config/Sana_2000M_480px_AdamW_fsdp.yaml
+sana_inference_config: configs/video_backbone_config/Sana_2000M_480px_adamW_fsdp_longsana.yaml
 generator_ckpt: hf://Efficient-Large-Model/LongSANA_2B_480p_self_forcing/checkpoints/LongSANA_2B_480p_self_forcing.pt
 fake_ckpt: hf://Efficient-Large-Model/SANA-Video_2B_480p/checkpoints/SANA_Video_2B_480p.pth
 real_ckpt: hf://Efficient-Large-Model/SANA-Video_2B_480p/checkpoints/SANA_Video_2B_480p.pth

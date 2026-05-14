@@ -9,7 +9,7 @@ The emphasis is practical:
 - which files implement each block
 - which file is the real entrypoint
 - which parts are custom Mobile-OV code
-- which parts are vendored SANA runtime code
+- which parts are vendored diffusion-backbone runtime code
 
 ## 1. High-level structure
 
@@ -18,7 +18,7 @@ There are two independent paths in this repo:
 1. **Generation**
 2. **Understanding**
 
-Generation uses the full Mobile-OV + SANA stack.
+Generation uses the full Mobile-OV + video diffusion backbone stack.
 
 Understanding uses the local SmolVLM2 model only.
 
@@ -41,8 +41,8 @@ Important simplification:
 Prompt text
   -> SmolVLM2 text model
   -> Mobile-OV lexical-gated bridge
-  -> SANA conditioning tokens
-  -> SANA-video DiT denoising
+  -> backbone conditioning tokens
+  -> video diffusion denoising
   -> WAN VAE decode
   -> MP4 / PNG output
 ```
@@ -57,7 +57,7 @@ Prompt
   -> lexical branch (early hidden layer)
   -> learned scalar lexical gate
   -> fused prompt tokens
-  -> SANA-video diffusion model
+  -> video diffusion model
   -> WAN VAE
   -> decoded video frames
 ```
@@ -72,7 +72,7 @@ This is the clean CLI entrypoint. It only exposes the generation settings we
 actually use for inference, such as:
 
 - Mobile-OV checkpoint path
-- SANA checkpoint directory
+- backbone checkpoint directory
 - SmolVLM2 checkpoint path
 - prompt
 - frame count
@@ -94,7 +94,7 @@ Responsibilities:
 - build the SmolVLM2-based lexical-gated bridge
 - prepare prompt embeddings
 - load the DiT trainable state from checkpoint
-- call the SANA runtime for sampling
+- call the vendored backbone runtime for sampling
 - decode and save output
 
 This file is where the trained Mobile-OV checkpoint is connected to the SANA
@@ -114,10 +114,10 @@ Key ideas implemented here:
 - fuse late semantic features
 - inject early lexical features
 - apply the learned scalar lexical gate
-- project into the SANA conditioning space
+- project into the backbone conditioning space
 
 This is the main custom Mobile-OV code that differentiates the model from
-vanilla SANA inference.
+plain backbone inference.
 
 ### 3.4 Supporting bridge modules
 
@@ -132,38 +132,38 @@ These files implement helper modules used by the bridge:
 Even if a given checkpoint does not rely heavily on the vision-head branch,
 these files are part of the active code path and are kept here for completeness.
 
-### 3.5 SANA runtime
+### 3.5 Diffusion backbone runtime
 
-- `tools/inference/sana_video_runtime.py`
+- `tools/inference/video_backbone_runtime.py`
 
-This is the clean SANA inference runtime used by the repo.
+This is the clean diffusion-backbone runtime used by the repo.
 
 Responsibilities:
 
-- load SANA config
-- load the base SANA-video DiT
+- load backbone config
+- load the base video diffusion model
 - load WAN VAE
 - prepare aspect ratio and latent shapes
 - run flow-matching / DPM sampling
 - decode latents into frames
 - save MP4
 
-This file is **runtime glue** around the base SANA implementation.
+This file is **runtime glue** around the vendored backbone implementation.
 
-### 3.6 Vendored SANA code
+### 3.6 Vendored backbone code
 
-- `nets/third_party/sana/`
+- `nets/third_party/video_backbone/`
 
-This directory contains the vendored SANA implementation that the runtime uses.
+This directory contains the vendored backbone implementation that the runtime uses.
 
 Important subareas:
 
-- `nets/third_party/sana/diffusion/model/`
-- `nets/third_party/sana/diffusion/scheduler/`
-- `nets/third_party/sana/diffusion/longsana/`
+- `nets/third_party/video_backbone/diffusion/model/`
+- `nets/third_party/video_backbone/diffusion/scheduler/`
+- `nets/third_party/video_backbone/diffusion/longsana/`
 
 These files are not Mobile-OV-specific, but they are needed because Mobile-OV
-generation depends on the SANA backbone.
+generation depends on the vendored diffusion backbone.
 
 ## 4. Understanding code map
 
@@ -230,7 +230,7 @@ This checkpoint provides:
 `tools/inference/mobile_ov_generate.py` reads these fields and reconstructs
 the bridge plus any trainable DiT deltas.
 
-### 5.2 Base SANA checkpoint directory
+### 5.2 Base backbone checkpoint directory
 
 Typical directory:
 
@@ -240,7 +240,7 @@ omni_ckpts/sana_video_2b_480p/
 
 This directory provides:
 
-- base SANA-video DiT weights
+- base video diffusion weights
 - WAN VAE weights
 
 ### 5.3 Local SmolVLM2 checkpoint
@@ -267,7 +267,7 @@ active path:
 - old Omni training/integrated model classes
 - old dataset loader code
 - the LLaVA tree
-- the legacy SANA inference script
+- the legacy backbone inference script
 
 That is why the repo is smaller and easier to trace than the training repo.
 
@@ -279,7 +279,7 @@ If someone new needs to understand the repo quickly, read in this order:
 2. `generate.py`
 3. `tools/inference/mobile_ov_generate.py`
 4. `nets/mobile_ov/mobile_ov_bridge.py`
-5. `tools/inference/sana_video_runtime.py`
+5. `tools/inference/video_backbone_runtime.py`
 6. `understand.py`
 7. `nets/smolvlm2/architecture_smolvlm2.py`
 

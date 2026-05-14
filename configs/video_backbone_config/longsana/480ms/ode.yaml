@@ -1,5 +1,5 @@
-sana_config: configs/sana_video_config/Sana_2000M_480px_AdamW_fsdp_chunk.yaml
-sana_inference_config: configs/sana_video_config/Sana_2000M_480px_adamW_fsdp_longsana.yaml
+sana_config: configs/video_backbone_config/Sana_2000M_480px_AdamW_fsdp_chunk.yaml
+sana_inference_config: configs/video_backbone_config/Sana_2000M_480px_adamW_fsdp_longsana.yaml
 generator_ckpt: hf://Efficient-Large-Model/SANA-Video_2B_480p/checkpoints/SANA_Video_2B_480p.pth
 generator_fsdp_wrap_strategy: size
 real_score_fsdp_wrap_strategy: size

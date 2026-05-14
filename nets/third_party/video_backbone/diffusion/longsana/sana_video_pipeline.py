@@ -29,7 +29,7 @@ from diffusion.utils.config import SanaVideoConfig
 
 @dataclass
 class LongSANAVideoInference(SanaVideoConfig):
-    config: Optional[str] = "configs/sana_video_config/longsana/480ms/self_forcing.yaml"  # config
+    config: Optional[str] = "configs/video_backbone_config/longsana/480ms/self_forcing.yaml"  # config
     model_path: str = field(
         default="hf://Efficient-Large-Model/LongSANA_2B_480p_self_forcing/checkpoints/LongSANA_2B_480p_self_forcing.pt",
         metadata={"help": "Path to the model file (positional)"},
