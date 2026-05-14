@@ -5,7 +5,7 @@ import argparse
 import os
 from pathlib import Path
 
-from tools.inference.test_q1_student_video import main as backend_main
+from tools.inference.mobile_ov_generate import main as generator_main
 
 
 REPO_ROOT = Path(__file__).resolve().parent
@@ -70,7 +70,7 @@ def main() -> int:
     if not checkpoint.exists():
         raise FileNotFoundError(f"Generation checkpoint not found: {checkpoint}")
 
-    backend_argv = [
+    generator_argv = [
         "--bridge-ckpt",
         str(checkpoint),
         "--checkpoint-dir",
@@ -101,7 +101,7 @@ def main() -> int:
         args.negative_prompt,
     ]
 
-    result = backend_main(backend_argv)
+    result = generator_main(generator_argv)
     return int(0 if result is None else result)
 
 

@@ -106,14 +106,15 @@ output/smoke_YYYYMMDD_HHMMSS/
 
 This repo supports one generation architecture only:
 
-- Mobile-OV v2 lexical-gated bridge
+- Mobile-OV lexical-gated bridge
 - SmolVLM2-500M text path
 - SANA-video 2B 480p base model
 - full DiT delta loaded from the Mobile-OV checkpoint
 
 That means the generation backend is intentionally **not** a general experiment
 launcher. It is a small, readable implementation of the exact path used by the
-current `60k` joint checkpoint.
+current `60k` joint checkpoint. Research versioning still lives in checkpoint
+names. The clean repo itself uses the simpler architecture name `Mobile-OV`.
 
 User-facing entrypoint:
 
@@ -217,11 +218,11 @@ If you only want to understand the repo, start here:
 
 - `generate.py`
 - `understand.py`
-- `tools/inference/test_q1_student_video.py`
-- `tools/inference/sana_video_inference_fixed.py`
-- `nets/omni/modules/sana_prompt_bridge.py`
-- `nets/omni/modules/adapter.py`
-- `nets/omni/modules/smolvlm2_vision_head.py`
+- `tools/inference/mobile_ov_generate.py`
+- `tools/inference/sana_video_runtime.py`
+- `nets/mobile_ov/mobile_ov_bridge.py`
+- `nets/mobile_ov/adapter.py`
+- `nets/mobile_ov/smolvlm2_vision_head.py`
 - `nets/smolvlm2/`
 
 Everything else exists only because the active path still needs it at runtime,

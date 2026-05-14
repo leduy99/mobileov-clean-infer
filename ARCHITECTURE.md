@@ -30,8 +30,10 @@ Important simplification:
 - generation is **single-path**
 - the clean repo does not try to support legacy bridge types, Gemma/Qwen
   backbones, LoRA inference branches, or dual-text inference
-- `tools/inference/test_q1_student_video.py` is intentionally written around the
-  current Mobile-OV v2 lexical-gated checkpoint family
+- `tools/inference/mobile_ov_generate.py` is intentionally written around the
+  current Mobile-OV lexical-gated checkpoint family
+- research versioning stays in checkpoint names; the clean repo uses the simpler
+  architecture name `Mobile-OV`
 
 ## 2. Mobile-OV generation: block diagram
 
@@ -81,14 +83,14 @@ It does **not** spawn another repo or shell out to a wrapper package.
 
 ### 3.2 Main generation implementation
 
-- `tools/inference/test_q1_student_video.py`
+- `tools/inference/mobile_ov_generate.py`
 
 This is the main Mobile-OV generation implementation in this repo.
 
 Responsibilities:
 
 - load the Mobile-OV checkpoint
-- validate that the checkpoint matches the supported v2 architecture
+- validate that the checkpoint matches the supported architecture
 - build the SmolVLM2-based lexical-gated bridge
 - prepare prompt embeddings
 - load the DiT trainable state from checkpoint
@@ -101,7 +103,7 @@ generation path.
 
 ### 3.3 Bridge implementation
 
-- `nets/omni/modules/sana_prompt_bridge.py`
+- `nets/mobile_ov/mobile_ov_bridge.py`
 
 This file contains the core Mobile-OV bridge logic.
 
@@ -119,8 +121,8 @@ vanilla SANA inference.
 
 ### 3.4 Supporting bridge modules
 
-- `nets/omni/modules/adapter.py`
-- `nets/omni/modules/smolvlm2_vision_head.py`
+- `nets/mobile_ov/adapter.py`
+- `nets/mobile_ov/smolvlm2_vision_head.py`
 
 These files implement helper modules used by the bridge:
 
@@ -132,7 +134,7 @@ these files are part of the active code path and are kept here for completeness.
 
 ### 3.5 SANA runtime
 
-- `tools/inference/sana_video_inference_fixed.py`
+- `tools/inference/sana_video_runtime.py`
 
 This is the clean SANA inference runtime used by the repo.
 
@@ -225,7 +227,7 @@ This checkpoint provides:
 - `infer_hints`
 - optional `dit_trainable_state`
 
-`tools/inference/test_q1_student_video.py` reads these fields and reconstructs
+`tools/inference/mobile_ov_generate.py` reads these fields and reconstructs
 the bridge plus any trainable DiT deltas.
 
 ### 5.2 Base SANA checkpoint directory
@@ -275,9 +277,9 @@ If someone new needs to understand the repo quickly, read in this order:
 
 1. `README.md`
 2. `generate.py`
-3. `tools/inference/test_q1_student_video.py`
-4. `nets/omni/modules/sana_prompt_bridge.py`
-5. `tools/inference/sana_video_inference_fixed.py`
+3. `tools/inference/mobile_ov_generate.py`
+4. `nets/mobile_ov/mobile_ov_bridge.py`
+5. `tools/inference/sana_video_runtime.py`
 6. `understand.py`
 7. `nets/smolvlm2/architecture_smolvlm2.py`
 

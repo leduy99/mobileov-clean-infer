@@ -1,7 +1,7 @@
 """
-SANA prompt bridge modules for Q1 distillation.
+Mobile-OV bridge modules.
 
-This module maps SmolVLM2 text embeddings to SANA prompt embeddings.
+This module maps SmolVLM2 text embeddings to the SANA conditioning space.
 """
 
 import logging
@@ -12,8 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
-from nets.omni.modules.adapter import DM_Adapter
-from nets.omni.modules.smolvlm2_vision_head import SmolVLM2VisionHead
+from nets.mobile_ov.adapter import DM_Adapter
+from nets.mobile_ov.smolvlm2_vision_head import SmolVLM2VisionHead
 from nets.smolvlm2 import load_smolvlm2_from_ckpt, SmolVLMModel
 
 
@@ -344,7 +344,7 @@ class MCPProjector(nn.Module):
         return x
 
 
-class SanaPromptBridge(nn.Module):
+class MobileOVBridge(nn.Module):
     """
     SmolVLM2 -> VisionHead -> DM_Adapter -> Resampler -> SANA prompt embeddings.
     """

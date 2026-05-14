@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Minimal Mobile-OV v2 generation path.
+Minimal Mobile-OV generation path.
 
 This file intentionally supports one architecture only:
 
@@ -32,17 +32,17 @@ if os.path.isdir(SANA_REPO_ROOT) and SANA_REPO_ROOT not in sys.path:
 
 from diffusion.data.datasets import utils as sana_dataset_utils
 from diffusion.model.utils import prepare_prompt_ar
-from nets.omni.modules.sana_prompt_bridge import SanaPromptBridge
+from nets.mobile_ov import MobileOVBridge
 
 
-def _load_sana_inference_backend():
-    from tools.inference import sana_video_inference_fixed
+def _load_sana_runtime():
+    from tools.inference import sana_video_runtime
 
-    return sana_video_inference_fixed
+    return sana_video_runtime
 
 
 @dataclass(frozen=True)
-class MobileOVV2Spec:
+class MobileOVSpec:
     projector_type: str = "mcp_lexical_gated"
     mcp_hidden_dim: int = 1536
     mcp_num_fuse_layers: int = 2
@@ -72,7 +72,7 @@ class MobileOVV2Spec:
     inference_flow_shift: float = 7.0
 
 
-SPEC = MobileOVV2Spec()
+SPEC = MobileOVSpec()
 TOKENIZER_MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 SANA_CONFIG_PATH = "configs/sana_video_config/Sana_2000M_480px_AdamW_fsdp.yaml"
 
@@ -156,13 +156,13 @@ def _assert_supported_checkpoint(student_state: dict, infer_hints: dict, dit_sta
 
     if unsupported:
         raise RuntimeError(
-            "Unsupported Mobile-OV checkpoint for the clean repo single-path backend: "
+            "Unsupported Mobile-OV checkpoint for the clean repo single-path runtime: "
             + ", ".join(unsupported)
         )
 
 
-def _build_bridge(device: torch.device, dtype: torch.dtype, smolvlm2_ckpt_path: str) -> SanaPromptBridge:
-    return SanaPromptBridge(
+def _build_bridge(device: torch.device, dtype: torch.dtype, smolvlm2_ckpt_path: str) -> MobileOVBridge:
+    return MobileOVBridge(
         smolvlm2_ckpt_path=smolvlm2_ckpt_path,
         adapter_ckpt_dir=None,
         adapter_in_channels=SPEC.adapter_in_channels,
@@ -202,7 +202,7 @@ def _build_bridge(device: torch.device, dtype: torch.dtype, smolvlm2_ckpt_path: 
     )
 
 
-def _load_checkpoint_weights(bridge: SanaPromptBridge, projector_state: dict, diffusion_model, dit_state: dict) -> None:
+def _load_checkpoint_weights(bridge: MobileOVBridge, projector_state: dict, diffusion_model, dit_state: dict) -> None:
     missing, unexpected = bridge.projector.load_state_dict(projector_state, strict=True)
     if missing or unexpected:
         raise RuntimeError(
@@ -220,7 +220,7 @@ def _load_checkpoint_weights(bridge: SanaPromptBridge, projector_state: dict, di
 
 
 def _build_conditioning(
-    bridge: SanaPromptBridge,
+    bridge: MobileOVBridge,
     prompt_text: str,
     negative_prompt: str,
     cfg_scale: float,
@@ -252,7 +252,7 @@ def _build_conditioning(
     return cond_embeddings, negative_embeddings, batch_mask
 
 
-def _save_output(video: np.ndarray, output_dir: str, prompt_text: str, backend) -> None:
+def _save_output(video: np.ndarray, output_dir: str, prompt_text: str, runtime) -> None:
     os.makedirs(output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     safe_prompt = "".join(c for c in prompt_text if c.isalnum() or c in (" ", "-", "_")).strip().replace(" ", "_")
@@ -266,13 +266,13 @@ def _save_output(video: np.ndarray, output_dir: str, prompt_text: str, backend) 
         return
 
     out_path = os.path.join(output_dir, f"q1_student_{timestamp}_{safe_prompt[:40]}.mp4")
-    backend.save_video(video, out_path, fps=16)
+    runtime.save_video(video, out_path, fps=16)
     print(f"Saved video to: {out_path}")
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Minimal Mobile-OV v2 generator")
-    parser.add_argument("--bridge-ckpt", type=str, required=True, help="Mobile-OV v2 checkpoint.")
+    parser = argparse.ArgumentParser(description="Minimal Mobile-OV generator")
+    parser.add_argument("--bridge-ckpt", type=str, required=True, help="Mobile-OV checkpoint.")
     parser.add_argument("--checkpoint-dir", type=str, default="omni_ckpts/sana_video_2b_480p")
     parser.add_argument(
         "--smolvlm2-ckpt-path",
@@ -297,13 +297,13 @@ def main(argv=None):
     args = parse_args(argv)
     device = torch.device(args.device)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    backend = _load_sana_inference_backend()
+    runtime = _load_sana_runtime()
 
     student_state, dit_state = _load_checkpoint_bundle(args.bridge_ckpt)
     projector_state = student_state["projector"]
 
     print(
-        "Mobile-OV clean backend: projector=%s hidden=%d K=%d refine=%s flow_shift=%.1f sampler=%s"
+        "Mobile-OV runtime: projector=%s hidden=%d K=%d refine=%s flow_shift=%.1f sampler=%s"
         % (
             SPEC.projector_type,
             SPEC.mcp_hidden_dim,
@@ -313,14 +313,14 @@ def main(argv=None):
             SPEC.sampling_algo,
         )
     )
-    print("Checkpoint contract validated for the clean v2 single-path backend.")
+    print("Checkpoint contract validated for the clean single-path Mobile-OV runtime.")
 
-    config = backend.load_config_file(SANA_CONFIG_PATH)
-    if not os.path.exists(args.checkpoint_dir) and hasattr(backend, "download_checkpoint"):
-        backend.download_checkpoint(local_dir=args.checkpoint_dir)
+    config = runtime.load_config_file(SANA_CONFIG_PATH)
+    if not os.path.exists(args.checkpoint_dir) and hasattr(runtime, "download_checkpoint"):
+        runtime.download_checkpoint(local_dir=args.checkpoint_dir)
 
     latent_size = args.height // config.vae.vae_downsample_rate
-    models = backend.load_sana_models(
+    models = runtime.load_sana_models(
         config=config,
         checkpoint_dir=args.checkpoint_dir,
         device=str(device),
@@ -382,7 +382,7 @@ def main(argv=None):
 
     generator = torch.Generator(device=device).manual_seed(int(args.seed))
     latents = torch.randn(latent_shape, device=device, dtype=dtype, generator=generator)
-    latents = backend.flow_matching_sampling(
+    latents = runtime.flow_matching_sampling(
         models["diffusion_model"],
         latents,
         text_embeddings,
@@ -408,7 +408,7 @@ def main(argv=None):
     video = np.clip((video + 1.0) / 2.0, 0, 1)
     video = (video * 255).astype(np.uint8)
 
-    _save_output(video, args.output_dir, prompt_text, backend)
+    _save_output(video, args.output_dir, prompt_text, runtime)
     return 0
 
 

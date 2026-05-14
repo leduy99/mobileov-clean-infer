@@ -9,7 +9,7 @@ This script follows the proper SANA inference pipeline:
 - Uses VAE decode properly
 
 Usage:
-    python sana_video_inference_fixed.py \
+    python sana_video_runtime.py \
         --prompt "a cat playing with a wool beside the fireside" \
         --output_dir output/sana_inference \
         --checkpoint_dir omni_ckpts/sana_video_2b_480p
