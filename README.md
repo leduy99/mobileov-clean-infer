@@ -29,6 +29,11 @@ Architecture and file map:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 
+Primary Python API:
+
+- `nets/mobile_ov/mobile_ov_model.py`
+- class: `MobileOVModel`
+
 ## Environment
 
 ```bash
@@ -154,6 +159,21 @@ python generate.py \
   --seed 0
 ```
 
+Direct Python API:
+
+```python
+from nets.mobile_ov import MobileOVModel
+
+model = MobileOVModel(device="cuda:0", dtype="bf16")
+video_path = model.generate_video(
+    prompt="a golden retriever running along a beach at sunset",
+    output_dir="output/demo_generation",
+    num_frames=81,
+    steps=24,
+    cfg_scale=6.0,
+)
+```
+
 ## Understanding
 
 User-facing entrypoint:
@@ -191,6 +211,20 @@ Default local SmolVLM2 checkpoint:
 
 ```text
 omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt
+```
+
+Direct Python API:
+
+```python
+from nets.mobile_ov import MobileOVModel
+
+model = MobileOVModel(device="cuda:0", dtype="bf16")
+text = model.understand_video(
+    video_path="/abs/path/to/video.mp4",
+    prompt="Describe the video in 2-3 sentences.",
+    num_frames=8,
+)
+print(text)
 ```
 
 ## Expected checkpoint layout

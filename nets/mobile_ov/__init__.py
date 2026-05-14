@@ -1,6 +1,5 @@
 """Active Mobile-OV modules used by the clean inference repo."""
 
-from .mobile_ov_bridge import MobileOVBridge
 from .mobile_ov_model import (
     MobileOVModel,
     default_generation_ckpt,
@@ -10,7 +9,6 @@ from .mobile_ov_model import (
 )
 
 __all__ = [
-    "MobileOVBridge",
     "MobileOVModel",
     "default_generation_ckpt",
     "default_smolvlm2_ckpt",

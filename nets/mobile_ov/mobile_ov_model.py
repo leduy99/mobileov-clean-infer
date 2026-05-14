@@ -21,7 +21,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 import cv2
 import numpy as np
@@ -39,8 +39,10 @@ if str(REPO_ROOT) not in sys.path:
 if VIDEO_BACKBONE_REPO_ROOT.is_dir() and str(VIDEO_BACKBONE_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(VIDEO_BACKBONE_REPO_ROOT))
 
-from nets.mobile_ov.mobile_ov_bridge import MobileOVBridge
 from nets.smolvlm2 import SmolVLMForConditionalGeneration, load_smolvlm2_from_ckpt
+
+if TYPE_CHECKING:
+    from nets.mobile_ov.mobile_ov_bridge import MobileOVBridge
 
 
 TOKENIZER_MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
@@ -159,7 +161,7 @@ class MobileOVModel(nn.Module):
         )
         self.smolvlm2_ckpt_path = resolve_path(smolvlm2_ckpt_path) or default_smolvlm2_ckpt().resolve()
 
-        self.bridge: MobileOVBridge | None = None
+        self.bridge: "MobileOVBridge | None" = None
         self.video_diffusion_model: nn.Module | None = None
         self.video_vae: nn.Module | None = None
         self.understanding_model: SmolVLMForConditionalGeneration | None = None
@@ -478,7 +480,9 @@ class MobileOVModel(nn.Module):
                 + ", ".join(unsupported)
             )
 
-    def _build_bridge(self) -> MobileOVBridge:
+    def _build_bridge(self) -> "MobileOVBridge":
+        from nets.mobile_ov.mobile_ov_bridge import MobileOVBridge
+
         return MobileOVBridge(
             smolvlm2_ckpt_path=str(self.smolvlm2_ckpt_path),
             adapter_ckpt_dir=None,
@@ -528,7 +532,7 @@ class MobileOVModel(nn.Module):
     def _load_checkpoint_weights(
         self,
         *,
-        bridge: MobileOVBridge,
+        bridge: "MobileOVBridge",
         projector_state: dict,
         diffusion_model: nn.Module,
         dit_state: dict,
