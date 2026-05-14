@@ -17,6 +17,7 @@ engineer can:
 
 The clean repo therefore makes a few strong choices:
 
+- one top-level full model class: `nets/mobile_ov/mobile_ov_model.py`
 - one active generation path: **SmolVLM2 -> lexical-gated Mobile-OV bridge -> video diffusion backbone**
 - one active understanding path: **local SmolVLM2 PyTorch model**
 - no sibling-repo dependency
@@ -218,9 +219,9 @@ If you only want to understand the repo, start here:
 
 - `generate.py`
 - `understand.py`
-- `tools/inference/mobile_ov_generate.py`
-- `tools/inference/video_backbone_runtime.py`
+- `nets/mobile_ov/mobile_ov_model.py`
 - `nets/mobile_ov/mobile_ov_bridge.py`
+- `tools/inference/video_backbone_runtime.py`
 - `nets/mobile_ov/adapter.py`
 - `nets/mobile_ov/smolvlm2_vision_head.py`
 - `nets/smolvlm2/`

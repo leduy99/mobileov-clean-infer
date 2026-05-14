@@ -2,26 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 from pathlib import Path
 
-from tools.inference.mobile_ov_generate import main as generator_main
-
-
-REPO_ROOT = Path(__file__).resolve().parent
-
-
-def default_generation_ckpt() -> Path:
-    return (
-        REPO_ROOT
-        / "omni_ckpts"
-        / "hf_mobile_ov"
-        / "stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt"
-    )
-
-
-def resolve_path(raw: str) -> Path:
-    return Path(raw).expanduser().resolve()
+from nets.mobile_ov import (
+    MobileOVModel,
+    default_generation_ckpt,
+    default_smolvlm2_ckpt,
+    default_video_backbone_checkpoint_dir,
+    resolve_path,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -29,20 +20,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default=None,
-        help="Mobile-OV checkpoint (.pt). Defaults to MOBILEOV_GENERATION_CKPT or the local 60k checkpoint.",
+        default=os.environ.get("MOBILEOV_GENERATION_CKPT", str(default_generation_ckpt())),
+        help="Mobile-OV checkpoint (.pt).",
     )
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
-        default=os.environ.get("MOBILEOV_BACKBONE_CHECKPOINT_DIR", os.environ.get("MOBILEOV_SANA_CHECKPOINT_DIR", "omni_ckpts/sana_video_2b_480p")),
+        default=os.environ.get("VIDEO_BACKBONE_CHECKPOINT_DIR", str(default_video_backbone_checkpoint_dir())),
         help="Local video backbone checkpoint directory.",
     )
     parser.add_argument(
         "--smolvlm2-ckpt-path",
         type=str,
-        default=os.environ.get("SMOLVLM2_CKPT_PATH", "omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt"),
-        help="Local SmolVLM2 checkpoint used by the bridge.",
+        default=os.environ.get("SMOLVLM2_CKPT_PATH", str(default_smolvlm2_ckpt())),
+        help="Local SmolVLM2 checkpoint used by Mobile-OV.",
     )
     parser.add_argument("--prompt", type=str, required=True, help="Prompt text.")
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save outputs.")
@@ -60,49 +51,33 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     os.environ.setdefault("PYTHONNOUSERSITE", "1")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
     args = parse_args()
 
-    ckpt_raw = args.checkpoint or os.environ.get("MOBILEOV_GENERATION_CKPT")
-    checkpoint = resolve_path(ckpt_raw) if ckpt_raw else default_generation_ckpt().resolve()
     output_dir = resolve_path(args.output_dir)
+    assert output_dir is not None
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if not checkpoint.exists():
-        raise FileNotFoundError(f"Generation checkpoint not found: {checkpoint}")
-
-    generator_argv = [
-        "--bridge-ckpt",
-        str(checkpoint),
-        "--checkpoint-dir",
-        args.checkpoint_dir,
-        "--smolvlm2-ckpt-path",
-        args.smolvlm2_ckpt_path,
-        "--prompt",
-        args.prompt,
-        "--output-dir",
-        str(output_dir),
-        "--num-frames",
-        str(args.num_frames),
-        "--height",
-        str(args.height),
-        "--width",
-        str(args.width),
-        "--steps",
-        str(args.steps),
-        "--cfg-scale",
-        str(args.cfg_scale),
-        "--seed",
-        str(args.seed),
-        "--device",
-        args.device,
-        "--dtype",
-        args.dtype,
-        "--negative-prompt",
-        args.negative_prompt,
-    ]
-
-    result = generator_main(generator_argv)
-    return int(0 if result is None else result)
+    model = MobileOVModel(
+        generation_ckpt_path=args.checkpoint,
+        video_backbone_checkpoint_dir=args.checkpoint_dir,
+        smolvlm2_ckpt_path=args.smolvlm2_ckpt_path,
+        device=args.device,
+        dtype=args.dtype,
+    )
+    output_path = model.generate_video(
+        prompt=args.prompt,
+        output_dir=output_dir,
+        num_frames=args.num_frames,
+        height=args.height,
+        width=args.width,
+        steps=args.steps,
+        cfg_scale=args.cfg_scale,
+        negative_prompt=args.negative_prompt,
+        seed=args.seed,
+    )
+    print(output_path)
+    return 0
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ STEPS=${STEPS:-24}
 CFG_SCALE=${CFG_SCALE:-6.0}
 NUM_FRAMES=${NUM_FRAMES:-9}
 CHECKPOINT=${CHECKPOINT:-"$DEFAULT_GENERATION_CKPT"}
-VIDEO_BACKBONE_CHECKPOINT_DIR=${VIDEO_BACKBONE_CHECKPOINT_DIR:-${SANA_CHECKPOINT_DIR:-"$DEFAULT_VIDEO_BACKBONE_CHECKPOINT_DIR"}}
+VIDEO_BACKBONE_CHECKPOINT_DIR=${VIDEO_BACKBONE_CHECKPOINT_DIR:-"$DEFAULT_VIDEO_BACKBONE_CHECKPOINT_DIR"}
 SMOLVLM2_CKPT_PATH=${SMOLVLM2_CKPT_PATH:-"$DEFAULT_SMOLVLM2_CKPT"}
 
 if [[ ! -f "$CHECKPOINT" ]]; then
@@ -30,7 +30,7 @@ fi
 
 if [[ ! -d "$VIDEO_BACKBONE_CHECKPOINT_DIR" ]]; then
   echo "Video backbone checkpoint directory not found: $VIDEO_BACKBONE_CHECKPOINT_DIR" >&2
-  echo "Either copy weights into repo-local omni_ckpts/ or export VIDEO_BACKBONE_CHECKPOINT_DIR=/abs/path/to/sana_video_2b_480p" >&2
+  echo "Either copy weights into repo-local omni_ckpts/ or export VIDEO_BACKBONE_CHECKPOINT_DIR=/abs/path/to/video_backbone_ckpts" >&2
   exit 1
 fi
 

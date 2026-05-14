@@ -27,11 +27,10 @@ checkpoint while keeping understanding simple and readable.
 
 Important simplification:
 
+- the repo now has one top-level full-model class: `nets/mobile_ov/mobile_ov_model.py`
 - generation is **single-path**
 - the clean repo does not try to support legacy bridge types, Gemma/Qwen
   backbones, LoRA inference branches, or dual-text inference
-- `tools/inference/mobile_ov_generate.py` is intentionally written around the
-  current Mobile-OV lexical-gated checkpoint family
 - research versioning stays in checkpoint names; the clean repo uses the simpler
   architecture name `Mobile-OV`
 
@@ -81,27 +80,52 @@ actually use for inference, such as:
 
 It does **not** spawn another repo or shell out to a wrapper package.
 
-### 3.2 Main generation implementation
+### 3.2 Full model implementation
 
-- `tools/inference/mobile_ov_generate.py`
+- `nets/mobile_ov/mobile_ov_model.py`
 
-This is the main Mobile-OV generation implementation in this repo.
+This is the main Mobile-OV implementation in this repo.
 
 Responsibilities:
 
-- load the Mobile-OV checkpoint
-- validate that the checkpoint matches the supported architecture
-- build the SmolVLM2-based lexical-gated bridge
-- prepare prompt embeddings
-- load the DiT trainable state from checkpoint
-- call the vendored backbone runtime for sampling
-- decode and save output
+- own the full active architecture
+- lazily load generation components
+- lazily load the understanding model
+- expose one set of clear methods for both tasks
+- keep the clean repo centered around one readable model file
 
-This file is where the trained Mobile-OV checkpoint is connected to the SANA
-runtime, and it is intentionally the single most important file to read for the
-generation path.
+Key public methods:
 
-### 3.3 Bridge implementation
+- `load_generation()`
+- `load_understanding()`
+- `generate_video(...)`
+- `generate_image(...)`
+- `understand(...)`
+- `understand_text(...)`
+- `understand_image(...)`
+- `understand_video(...)`
+
+If you want to understand the **full Mobile-OV architecture**, this is now the
+single most important file to read first.
+
+### 3.3 Generation backend runtime
+
+- `tools/inference/video_backbone_runtime.py`
+
+This file is the low-level diffusion-backbone runtime used by
+`MobileOVModel.generate_video(...)`.
+
+Responsibilities:
+
+- load the base video diffusion model
+- load WAN VAE
+- run flow-matching / DPM sampling
+- decode latents into frames
+- save MP4 / PNG
+
+This file is runtime glue. It is not the full Mobile-OV architecture by itself.
+
+### 3.4 Bridge implementation
 
 - `nets/mobile_ov/mobile_ov_bridge.py`
 
@@ -119,7 +143,7 @@ Key ideas implemented here:
 This is the main custom Mobile-OV code that differentiates the model from
 plain backbone inference.
 
-### 3.4 Supporting bridge modules
+### 3.5 Supporting bridge modules
 
 - `nets/mobile_ov/adapter.py`
 - `nets/mobile_ov/smolvlm2_vision_head.py`
@@ -131,24 +155,6 @@ These files implement helper modules used by the bridge:
 
 Even if a given checkpoint does not rely heavily on the vision-head branch,
 these files are part of the active code path and are kept here for completeness.
-
-### 3.5 Diffusion backbone runtime
-
-- `tools/inference/video_backbone_runtime.py`
-
-This is the clean diffusion-backbone runtime used by the repo.
-
-Responsibilities:
-
-- load backbone config
-- load the base video diffusion model
-- load WAN VAE
-- prepare aspect ratio and latent shapes
-- run flow-matching / DPM sampling
-- decode latents into frames
-- save MP4
-
-This file is **runtime glue** around the vendored backbone implementation.
 
 ### 3.6 Vendored backbone code
 
@@ -173,12 +179,7 @@ generation depends on the vendored diffusion backbone.
 
 This is the clean CLI entrypoint for understanding.
 
-Responsibilities:
-
-- load a local SmolVLM2 checkpoint
-- sample frames from video inputs
-- build tokenizer/processor inputs
-- run text generation on the local SmolVLM2 model
+It now delegates to `MobileOVModel.understand(...)`.
 
 ### 4.2 Local SmolVLM2 model code
 
@@ -187,7 +188,8 @@ Responsibilities:
 - `nets/smolvlm2/architecture_smolvlm2.py`
 - `nets/smolvlm2/config_smolvlm2.py`
 
-This is the local SmolVLM2 implementation used by `understand.py`.
+This is the local SmolVLM2 implementation used by `MobileOVModel` for
+understanding.
 
 File roles:
 
@@ -227,8 +229,8 @@ This checkpoint provides:
 - `infer_hints`
 - optional `dit_trainable_state`
 
-`tools/inference/mobile_ov_generate.py` reads these fields and reconstructs
-the bridge plus any trainable DiT deltas.
+`nets/mobile_ov/mobile_ov_model.py` reads these fields and reconstructs the
+bridge plus any trainable DiT deltas.
 
 ### 5.2 Base backbone checkpoint directory
 
@@ -277,7 +279,7 @@ If someone new needs to understand the repo quickly, read in this order:
 
 1. `README.md`
 2. `generate.py`
-3. `tools/inference/mobile_ov_generate.py`
+3. `nets/mobile_ov/mobile_ov_model.py`
 4. `nets/mobile_ov/mobile_ov_bridge.py`
 5. `tools/inference/video_backbone_runtime.py`
 6. `understand.py`
