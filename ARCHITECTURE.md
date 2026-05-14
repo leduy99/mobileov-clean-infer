@@ -25,6 +25,14 @@ Understanding uses the local SmolVLM2 model only.
 That split is deliberate. It keeps generation faithful to the trained Mobile-OV
 checkpoint while keeping understanding simple and readable.
 
+Important simplification:
+
+- generation is **single-path**
+- the clean repo does not try to support legacy bridge types, Gemma/Qwen
+  backbones, LoRA inference branches, or dual-text inference
+- `tools/inference/test_q1_student_video.py` is intentionally written around the
+  current Mobile-OV v2 lexical-gated checkpoint family
+
 ## 2. Mobile-OV generation: block diagram
 
 ```text
@@ -80,15 +88,16 @@ This is the main Mobile-OV generation implementation in this repo.
 Responsibilities:
 
 - load the Mobile-OV checkpoint
-- read `infer_hints`
-- build the SmolVLM2-based bridge
+- validate that the checkpoint matches the supported v2 architecture
+- build the SmolVLM2-based lexical-gated bridge
 - prepare prompt embeddings
-- optionally load DiT trainable state from checkpoint
+- load the DiT trainable state from checkpoint
 - call the SANA runtime for sampling
 - decode and save output
 
 This file is where the trained Mobile-OV checkpoint is connected to the SANA
-runtime.
+runtime, and it is intentionally the single most important file to read for the
+generation path.
 
 ### 3.3 Bridge implementation
 

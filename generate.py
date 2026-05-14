@@ -39,22 +39,10 @@ def parse_args() -> argparse.Namespace:
         help="Local SANA checkpoint directory.",
     )
     parser.add_argument(
-        "--config",
-        type=str,
-        default=os.environ.get("MOBILEOV_SANA_CONFIG", "configs/sana_video_config/Sana_2000M_480px_AdamW_fsdp.yaml"),
-        help="SANA config path.",
-    )
-    parser.add_argument(
         "--smolvlm2-ckpt-path",
         type=str,
         default=os.environ.get("SMOLVLM2_CKPT_PATH", "omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt"),
         help="Local SmolVLM2 checkpoint used by the bridge.",
-    )
-    parser.add_argument(
-        "--tokenizer-model-id",
-        type=str,
-        default=os.environ.get("SMOLVLM2_TOKENIZER_MODEL_ID", "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"),
-        help="Tokenizer/processor id for the SmolVLM2 text path.",
     )
     parser.add_argument("--prompt", type=str, required=True, help="Prompt text.")
     parser.add_argument("--output-dir", type=str, required=True, help="Directory to save outputs.")
@@ -67,9 +55,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--device", type=str, default="cuda:0", help="Torch device.")
     parser.add_argument("--dtype", type=str, default="bf16", choices=["bf16", "fp32"], help="Inference dtype.")
     parser.add_argument("--negative-prompt", type=str, default="", help="Negative prompt.")
-    parser.add_argument("--sampling-algo", type=str, default=None, help="Optional sampling override.")
-    parser.add_argument("--motion-score", type=int, default=10, help="Motion score hint for prompt preprocessing.")
-    parser.add_argument("--use-chi-prompt", action="store_true", help="Enable CHI prompt formatting when supported.")
     return parser.parse_args()
 
 
@@ -90,12 +75,8 @@ def main() -> int:
         str(checkpoint),
         "--checkpoint-dir",
         args.checkpoint_dir,
-        "--config",
-        args.config,
         "--smolvlm2-ckpt-path",
         args.smolvlm2_ckpt_path,
-        "--tokenizer-model-id",
-        args.tokenizer_model_id,
         "--prompt",
         args.prompt,
         "--output-dir",
@@ -118,13 +99,7 @@ def main() -> int:
         args.dtype,
         "--negative-prompt",
         args.negative_prompt,
-        "--motion-score",
-        str(args.motion_score),
     ]
-    if args.sampling_algo:
-        backend_argv.extend(["--sampling-algo", args.sampling_algo])
-    if args.use_chi_prompt:
-        backend_argv.append("--use-chi-prompt")
 
     result = backend_main(backend_argv)
     return int(0 if result is None else result)

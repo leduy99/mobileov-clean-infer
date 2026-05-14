@@ -22,6 +22,7 @@ The clean repo therefore makes a few strong choices:
 - no sibling-repo dependency
 - no `python -m mobileov_infer...` wrapper package
 - no alternative bridge backbones such as Gemma/Qwen in the active path
+- no generation-time LoRA branches or multi-backbone inference branches
 
 Architecture and file map:
 
@@ -103,6 +104,17 @@ output/smoke_YYYYMMDD_HHMMSS/
 
 ## Generation
 
+This repo supports one generation architecture only:
+
+- Mobile-OV v2 lexical-gated bridge
+- SmolVLM2-500M text path
+- SANA-video 2B 480p base model
+- full DiT delta loaded from the Mobile-OV checkpoint
+
+That means the generation backend is intentionally **not** a general experiment
+launcher. It is a small, readable implementation of the exact path used by the
+current `60k` joint checkpoint.
+
 User-facing entrypoint:
 
 ```bash
@@ -138,12 +150,6 @@ python generate.py \
   --height 480 \
   --width 832 \
   --seed 0
-```
-
-Default generation checkpoint:
-
-```text
-omni_ckpts/hf_mobile_ov/stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt
 ```
 
 ## Understanding
