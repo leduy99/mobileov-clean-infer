@@ -23,6 +23,10 @@ class SmolVLMVisionConfig:
     layer_norm_eps: float = 1e-6
     attention_dropout: float = 0.0
     initializer_range: float = 0.02
+    output_attentions: bool = False
+    output_hidden_states: bool = False
+    return_dict: bool = True
+    use_return_dict: bool = True
 
 
 @dataclass
@@ -38,6 +42,11 @@ class SmolVLMTextConfig:
     rms_norm_eps: float = 1e-5
     pad_token_id: int = 128002
     tie_word_embeddings: bool = False
+    output_attentions: bool = False
+    output_hidden_states: bool = False
+    return_dict: bool = True
+    use_return_dict: bool = True
+    use_cache: bool = True
 
 
 @dataclass
@@ -49,6 +58,10 @@ class SmolVLMConfig:
     scale_factor: int = 2
     use_cache: bool = True
     pad_token_id: int = 128002
+    output_attentions: bool = False
+    output_hidden_states: bool = False
+    return_dict: bool = True
+    use_return_dict: bool = True
     
     def __post_init__(self):
         if self.vision_config is None:
@@ -68,7 +81,9 @@ class SmolVLMConfig:
                     'hidden_size', 'intermediate_size', 'num_hidden_layers',
                     'num_attention_heads', 'num_channels', 'image_size',
                     'patch_size', 'hidden_act', 'layer_norm_eps',
-                    'attention_dropout', 'initializer_range'
+                    'attention_dropout', 'initializer_range',
+                    'output_attentions', 'output_hidden_states',
+                    'return_dict', 'use_return_dict',
                 }
                 vision_dict = {
                     k: v for k, v in config_dict["vision_config"].items()
@@ -86,7 +101,9 @@ class SmolVLMConfig:
                     'vocab_size', 'hidden_size', 'intermediate_size',
                     'num_hidden_layers', 'num_attention_heads',
                     'num_key_value_heads', 'max_position_embeddings',
-                    'rms_norm_eps', 'pad_token_id', 'tie_word_embeddings'
+                    'rms_norm_eps', 'pad_token_id', 'tie_word_embeddings',
+                    'output_attentions', 'output_hidden_states',
+                    'return_dict', 'use_return_dict', 'use_cache',
                 }
                 text_dict = {
                     k: v for k, v in config_dict["text_config"].items()
@@ -98,7 +115,9 @@ class SmolVLMConfig:
         
         # Create main config - only use valid keys
         valid_main_keys = {
-            'image_token_id', 'scale_factor', 'use_cache', 'pad_token_id'
+            'image_token_id', 'scale_factor', 'use_cache', 'pad_token_id',
+            'output_attentions', 'output_hidden_states',
+            'return_dict', 'use_return_dict',
         }
         main_config = {
             k: v for k, v in config_dict.items()
@@ -121,5 +140,4 @@ class SmolVLMConfig:
             "use_cache": self.use_cache,
             "pad_token_id": self.pad_token_id,
         }
-
 

@@ -7,6 +7,7 @@ The actual model architecture is preserved from the converted checkpoint.
 
 import os
 import logging
+from collections.abc import Mapping
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -58,6 +59,76 @@ def _patch_hf_config_compat(cfg) -> None:
                 setattr(cfg, key, default_val)
             except Exception:
                 pass
+
+
+def _patch_generation_config_compat(generation_config) -> None:
+    """Populate generation_config fields expected by newer transformers runtimes."""
+    if generation_config is None:
+        return
+
+    try:
+        from transformers import GenerationConfig
+        from transformers.generation.configuration_utils import CompileConfig
+
+        default_config = GenerationConfig()
+        for key, value in default_config.to_dict().items():
+            if not hasattr(generation_config, key):
+                try:
+                    setattr(generation_config, key, value)
+                except Exception:
+                    pass
+
+        if getattr(generation_config, "compile_config", None) is None:
+            try:
+                generation_config.compile_config = CompileConfig()
+            except Exception:
+                pass
+    except Exception:
+        # Best-effort only; generation can still succeed on older stacks.
+        pass
+
+
+def _patch_hf_runtime_compat(obj, visited: Optional[set[int]] = None) -> None:
+    """Recursively patch configs nested inside loaded HF objects."""
+    if obj is None:
+        return
+
+    if visited is None:
+        visited = set()
+    obj_id = id(obj)
+    if obj_id in visited:
+        return
+    visited.add(obj_id)
+
+    _patch_hf_config_compat(obj)
+
+    generation_config = getattr(obj, "generation_config", None)
+    if generation_config is not None:
+        _patch_generation_config_compat(generation_config)
+        _patch_hf_config_compat(generation_config)
+
+    for attr_name in (
+        "config",
+        "vision_config",
+        "text_config",
+        "model",
+        "vision_model",
+        "text_model",
+    ):
+        nested = getattr(obj, attr_name, None)
+        if nested is not None and nested is not obj:
+            _patch_hf_runtime_compat(nested, visited)
+
+    if isinstance(obj, Mapping):
+        iterable = obj.values()
+    elif isinstance(obj, (list, tuple)):
+        iterable = obj
+    else:
+        iterable = ()
+
+    for item in iterable:
+        if hasattr(item, "__dict__") or isinstance(item, (Mapping, list, tuple)):
+            _patch_hf_runtime_compat(item, visited)
 
 
 @dataclass
@@ -115,9 +186,8 @@ class SmolVLMModel(nn.Module):
             cfg_obj = checkpoint.get("config", None)
             if cfg_obj is not None:
                 self.config = cfg_obj
-                _patch_hf_config_compat(self.config)
-            if hasattr(self._model, "config"):
-                _patch_hf_config_compat(self._model.config)
+                _patch_hf_runtime_compat(self.config)
+            _patch_hf_runtime_compat(self._model)
             if hasattr(self._model, "to"):
                 self._model = self._model.to(device)
             if hasattr(self._model, "eval"):
@@ -134,7 +204,7 @@ class SmolVLMModel(nn.Module):
                 if "config" in checkpoint and checkpoint["config"] is not None:
                     # Load trực tiếp từ checkpoint object (không cần internet) ✅
                     self.config = checkpoint["config"]
-                    _patch_hf_config_compat(self.config)
+                    _patch_hf_runtime_compat(self.config)
                     logger.info("✓ Config loaded directly from checkpoint (no internet needed)")
                 elif "config_dict" in checkpoint:
                     config_dict = checkpoint["config_dict"]
@@ -144,7 +214,7 @@ class SmolVLMModel(nn.Module):
                             from transformers.models.smolvlm import configuration_smolvlm
                             transformers_config = configuration_smolvlm.SmolVLMConfig.from_dict(config_dict)
                             self.config = transformers_config
-                            _patch_hf_config_compat(self.config)
+                            _patch_hf_runtime_compat(self.config)
                             logger.info("✓ Config reconstructed from dict (no internet needed)")
                         except Exception as e:
                             logger.warning(f"Could not reconstruct config from dict: {e}")
@@ -157,22 +227,22 @@ class SmolVLMModel(nn.Module):
                                         model_id, trust_remote_code=True
                                     )
                                     self.config = transformers_config
-                                    _patch_hf_config_compat(self.config)
+                                    _patch_hf_runtime_compat(self.config)
                                     logger.info("✓ Config loaded from HuggingFace (internet required)")
                                 except Exception as e2:
                                     logger.warning(f"Could not load config from HuggingFace: {e2}")
                                     # Final fallback: use local config
                                     from .config_smolvlm2 import SmolVLMConfig
                                     self.config = SmolVLMConfig.from_dict(config_dict)
-                                    _patch_hf_config_compat(self.config)
+                                    _patch_hf_runtime_compat(self.config)
                             else:
                                 # Use local config
                                 from .config_smolvlm2 import SmolVLMConfig
                                 self.config = SmolVLMConfig.from_dict(config_dict)
-                                _patch_hf_config_compat(self.config)
+                                _patch_hf_runtime_compat(self.config)
                     else:
                         self.config = config_dict
-                        _patch_hf_config_compat(self.config)
+                        _patch_hf_runtime_compat(self.config)
                 else:
                     raise ValueError("Neither 'config' nor 'config_dict' found in checkpoint")
                 
@@ -222,6 +292,7 @@ class SmolVLMModel(nn.Module):
                         logger.warning(f"Could not reconstruct tokenizer from vocab: {e}")
                 
                 # Move to device and set eval mode
+                _patch_hf_runtime_compat(self._model)
                 self._model = self._model.to(device)
                 self._model.eval()
                 
@@ -240,7 +311,7 @@ class SmolVLMModel(nn.Module):
                 self._tokenizer = checkpoint.get("tokenizer", None)
                 if hasattr(checkpoint.get("config"), "__dict__"):
                     self.config = checkpoint.get("config")
-                    _patch_hf_config_compat(self.config)
+                    _patch_hf_runtime_compat(self.config)
             else:
                 # Assume the whole dict is the model
                 self._model = checkpoint
@@ -248,8 +319,7 @@ class SmolVLMModel(nn.Module):
             # Direct model object
             self._model = checkpoint
 
-        if hasattr(self._model, "config"):
-            _patch_hf_config_compat(self._model.config)
+        _patch_hf_runtime_compat(self._model)
         
         # Move to device and set eval mode
         if hasattr(self._model, "to"):
@@ -398,9 +468,8 @@ class SmolVLMForConditionalGeneration(SmolVLMModel):
             cfg_obj = checkpoint.get("config", None)
             if cfg_obj is not None:
                 self.config = cfg_obj
-                _patch_hf_config_compat(self.config)
-            if hasattr(self._model, "config"):
-                _patch_hf_config_compat(self._model.config)
+                _patch_hf_runtime_compat(self.config)
+            _patch_hf_runtime_compat(self._model)
             if hasattr(self._model, "to"):
                 self._model = self._model.to(device)
             if hasattr(self._model, "eval"):
@@ -416,22 +485,22 @@ class SmolVLMForConditionalGeneration(SmolVLMModel):
                 # Load config
                 if "config" in checkpoint and checkpoint["config"] is not None:
                     self.config = checkpoint["config"]
-                    _patch_hf_config_compat(self.config)
+                    _patch_hf_runtime_compat(self.config)
                 elif "config_dict" in checkpoint:
                     config_dict = checkpoint["config_dict"]
                     if isinstance(config_dict, dict):
                         try:
                             from transformers.models.smolvlm import configuration_smolvlm
                             self.config = configuration_smolvlm.SmolVLMConfig.from_dict(config_dict)
-                            _patch_hf_config_compat(self.config)
+                            _patch_hf_runtime_compat(self.config)
                         except Exception as e:
                             logger.warning(f"Could not reconstruct config: {e}")
                             from .config_smolvlm2 import SmolVLMConfig
                             self.config = SmolVLMConfig.from_dict(config_dict)
-                            _patch_hf_config_compat(self.config)
+                            _patch_hf_runtime_compat(self.config)
                     else:
                         self.config = config_dict
-                        _patch_hf_config_compat(self.config)
+                        _patch_hf_runtime_compat(self.config)
                 else:
                     raise ValueError("Config not found in checkpoint")
                 
@@ -461,6 +530,7 @@ class SmolVLMForConditionalGeneration(SmolVLMModel):
                         logger.warning(f"Could not reconstruct tokenizer: {e}")
                 
                 # Move to device and set eval mode
+                _patch_hf_runtime_compat(self._model)
                 self._model = self._model.to(device)
                 self._model.eval()
                 

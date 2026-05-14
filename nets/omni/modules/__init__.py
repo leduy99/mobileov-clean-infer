@@ -1,1 +1,1 @@
-from .visual_context_adapter import VisualContextAdapter
+"""Minimal Mobile-OV modules package used by the clean inference repo."""

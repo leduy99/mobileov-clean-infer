@@ -9,7 +9,7 @@ GPUS=${GPUS:-1}
 TIME_LIMIT=${TIME_LIMIT:-02:00:00}
 CPUS_PER_TASK=${CPUS_PER_TASK:-16}
 MEMORY=${MEMORY:-128G}
-SESSION_NAME=${SESSION_NAME:-mobileov_infer}
+SESSION_NAME=${SESSION_NAME:-mobileov_clean}
 
 exec srun \
   --partition="${PARTITION}" \

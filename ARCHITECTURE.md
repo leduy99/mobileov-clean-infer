@@ -1,164 +1,275 @@
 # Architecture
 
-This repository is a **clean self-contained inference repository**. It is not a
-training repo, but it does carry the local generation code it needs so that
-inference does not depend on a separate sibling checkout.
+This document maps the **actual active Mobile-OV inference path** in this clean
+repo.
 
-That means:
+The emphasis is practical:
 
-- the user-facing interface lives here
-- the heavy generation backend is vendored locally
-- the understanding path is intentionally kept simple and direct
+- what the model is made of
+- which files implement each block
+- which file is the real entrypoint
+- which parts are custom Mobile-OV code
+- which parts are vendored SANA runtime code
 
-The goal is to make inference easy to run without mixing it with the large
-training codebase.
+## 1. High-level structure
 
-## High-level split
-
-There are two separate paths in this clean repo:
+There are two independent paths in this repo:
 
 1. **Generation**
 2. **Understanding**
 
-They intentionally use different backends.
+Generation uses the full Mobile-OV + SANA stack.
 
-## 1. Generation architecture
+Understanding uses the local SmolVLM2 model only.
 
-The generation path uses the local Mobile-OV generation stack inside this repo:
+That split is deliberate. It keeps generation faithful to the trained Mobile-OV
+checkpoint while keeping understanding simple and readable.
 
-- wrapper here: `mobileov_infer/generate.py`
-- local backend entrypoint: `tools/inference/test_q1_student_video.py`
-- local SANA runtime: `tools/inference/sana_video_inference_fixed.py`
-- local bridge/model code: `nets/...`
-- local config files: `configs/sana_video_config/...`
-
-### Generation dataflow
+## 2. Mobile-OV generation: block diagram
 
 ```text
 Prompt text
-  -> SmolVLM2 text path inside student bridge
-  -> lexical-gated MCP projector
-  -> SANA-video conditioning tokens
+  -> SmolVLM2 text model
+  -> Mobile-OV lexical-gated bridge
+  -> SANA conditioning tokens
   -> SANA-video DiT denoising
   -> WAN VAE decode
   -> MP4 / PNG output
 ```
 
-### More explicit view
+More explicitly:
 
 ```text
 Prompt
-  -> tokenizer
+  -> tokenizer / text preprocessing
   -> SmolVLM2 hidden states
-  -> semantic branch (last K layers)
+  -> semantic branch (late hidden layers)
   -> lexical branch (early hidden layer)
-  -> scalar lexical gate
-  -> fused prompt conditioning
+  -> learned scalar lexical gate
+  -> fused prompt tokens
   -> SANA-video diffusion model
-  -> VAE decode
-  -> generated video or image
+  -> WAN VAE
+  -> decoded video frames
 ```
 
-### What is actually loaded
+## 3. Generation code map
 
-At inference time, the generation path loads:
+### 3.1 User-facing entrypoint
 
-- SANA-video backbone
-- WAN VAE
-- Mobile-OV bridge / projector weights
-- optional DiT trainable state from the checkpoint, when present
+- `generate.py`
 
-### Default generation checkpoint in this clean repo
+This is the clean CLI entrypoint. It only exposes the generation settings we
+actually use for inference, such as:
+
+- Mobile-OV checkpoint path
+- SANA checkpoint directory
+- SmolVLM2 checkpoint path
+- prompt
+- frame count
+- steps
+- CFG
+
+It does **not** spawn another repo or shell out to a wrapper package.
+
+### 3.2 Main generation implementation
+
+- `tools/inference/test_q1_student_video.py`
+
+This is the main Mobile-OV generation implementation in this repo.
+
+Responsibilities:
+
+- load the Mobile-OV checkpoint
+- read `infer_hints`
+- build the SmolVLM2-based bridge
+- prepare prompt embeddings
+- optionally load DiT trainable state from checkpoint
+- call the SANA runtime for sampling
+- decode and save output
+
+This file is where the trained Mobile-OV checkpoint is connected to the SANA
+runtime.
+
+### 3.3 Bridge implementation
+
+- `nets/omni/modules/sana_prompt_bridge.py`
+
+This file contains the core Mobile-OV bridge logic.
+
+Key ideas implemented here:
+
+- load local SmolVLM2
+- collect hidden states from the text model
+- fuse late semantic features
+- inject early lexical features
+- apply the learned scalar lexical gate
+- project into the SANA conditioning space
+
+This is the main custom Mobile-OV code that differentiates the model from
+vanilla SANA inference.
+
+### 3.4 Supporting bridge modules
+
+- `nets/omni/modules/adapter.py`
+- `nets/omni/modules/smolvlm2_vision_head.py`
+
+These files implement helper modules used by the bridge:
+
+- adapter blocks
+- optional resampling / query compression path
+
+Even if a given checkpoint does not rely heavily on the vision-head branch,
+these files are part of the active code path and are kept here for completeness.
+
+### 3.5 SANA runtime
+
+- `tools/inference/sana_video_inference_fixed.py`
+
+This is the clean SANA inference runtime used by the repo.
+
+Responsibilities:
+
+- load SANA config
+- load the base SANA-video DiT
+- load WAN VAE
+- prepare aspect ratio and latent shapes
+- run flow-matching / DPM sampling
+- decode latents into frames
+- save MP4
+
+This file is **runtime glue** around the base SANA implementation.
+
+### 3.6 Vendored SANA code
+
+- `nets/third_party/sana/`
+
+This directory contains the vendored SANA implementation that the runtime uses.
+
+Important subareas:
+
+- `nets/third_party/sana/diffusion/model/`
+- `nets/third_party/sana/diffusion/scheduler/`
+- `nets/third_party/sana/diffusion/longsana/`
+
+These files are not Mobile-OV-specific, but they are needed because Mobile-OV
+generation depends on the SANA backbone.
+
+## 4. Understanding code map
+
+### 4.1 User-facing entrypoint
+
+- `understand.py`
+
+This is the clean CLI entrypoint for understanding.
+
+Responsibilities:
+
+- load a local SmolVLM2 checkpoint
+- sample frames from video inputs
+- build tokenizer/processor inputs
+- run text generation on the local SmolVLM2 model
+
+### 4.2 Local SmolVLM2 model code
+
+- `nets/smolvlm2/load_smolvlm2.py`
+- `nets/smolvlm2/modeling_smolvlm2.py`
+- `nets/smolvlm2/architecture_smolvlm2.py`
+- `nets/smolvlm2/config_smolvlm2.py`
+
+This is the local SmolVLM2 implementation used by `understand.py`.
+
+File roles:
+
+- `load_smolvlm2.py`
+  Loads the converted `.pt` checkpoint into the local model class.
+- `modeling_smolvlm2.py`
+  Public wrapper class for loading and generation.
+- `architecture_smolvlm2.py`
+  Core network architecture.
+- `config_smolvlm2.py`
+  Minimal config objects needed to reconstruct the model.
+
+Important design choice:
+
+- the **model implementation is local**
+- `transformers` is used only for tokenizer/processor convenience
+- the repo does **not** rely on `AutoModel...` as the SmolVLM2 runtime
+
+That keeps the model readable for engineers who need to port it to another
+runtime.
+
+## 5. Checkpoint contract
+
+The Mobile-OV generation path expects three kinds of weights:
+
+### 5.1 Mobile-OV checkpoint
+
+Typical file:
 
 ```text
 omni_ckpts/hf_mobile_ov/stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt
 ```
 
-## 2. Understanding architecture
+This checkpoint provides:
 
-The understanding path does **not** reuse the large local research wrapper.
-Instead, it uses Hugging Face SmolVLM2 directly.
+- `student_state`
+- `infer_hints`
+- optional `dit_trainable_state`
 
-- wrapper here: `mobileov_infer/understand.py`
-- model id:
-  `HuggingFaceTB/SmolVLM2-500M-Video-Instruct`
+`tools/inference/test_q1_student_video.py` reads these fields and reconstructs
+the bridge plus any trainable DiT deltas.
 
-### Understanding dataflow
+### 5.2 Base SANA checkpoint directory
 
-```text
-Image / video
-  -> frame sampling (for video)
-  -> Hugging Face AutoProcessor
-  -> SmolVLM2-500M-Video-Instruct
-  -> generated text response
-```
-
-### Why this path is separate
-
-This was a deliberate design choice:
-
-- generation in this project depends on the custom Mobile-OV + SANA backend
-- understanding is much easier to keep stable by using the direct HF model
-
-So the clean repo avoids pulling in older local VQA helper code and avoids
-unnecessary dependency coupling.
-
-## Repository architecture
-
-The clean repo keeps the surface area small, but it now includes the local
-runtime needed for generation:
+Typical directory:
 
 ```text
-Mobile-OV-Infer-Clean/
-  README.md
-  ARCHITECTURE.md
-  configs/
-    sana_video_config/
-  mobileov_infer/
-    common.py
-    generate.py
-    understand.py
-  nets/
-    omni/
-    smolvlm2/
-    third_party/sana/
-  tools/
-    __init__.py
-    inference/
-      runtime_helpers.py
-      sana_video_inference_fixed.py
-      test_q1_student_video.py
-  scripts/
-    request_debug_tmux.sh
-    generate.sh
-    understand.sh
-    smoke_test.sh
+omni_ckpts/sana_video_2b_480p/
 ```
 
-## Why the repo is still called "clean"
+This directory provides:
 
-This repo is designed to stay clean at the workflow level:
+- base SANA-video DiT weights
+- WAN VAE weights
 
-- generation and understanding have short, stable entrypoints
-- SLURM usage stays simple
-- training utilities, dataset prep, and experiment notes stay out of the way
+### 5.3 Local SmolVLM2 checkpoint
 
-We did vendor the minimum local runtime needed for generation, because a thin
-frontend that points to another repo is easy to break in practice and does not
-meet the "self-contained" requirement.
-
-So the design is:
-
-- **clean inference workflow here**
-- **local generation backend here**
-- **source-of-truth understanding model from Hugging Face**
-
-## Practical mental model
-
-The easiest way to think about this repo is:
+Typical file:
 
 ```text
-This repo = simple CLI + SLURM-safe workflow
-Generation model = local Mobile-OV + SANA inference stack
-Understanding model = direct HF SmolVLM2
+omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt
 ```
+
+This file is used in two places:
+
+- as the text model inside the Mobile-OV bridge
+- as the standalone local model for understanding
+
+## 6. What was intentionally removed
+
+This clean repo intentionally removes or disables code that is not part of the
+active path:
+
+- wrapper package entrypoints
+- sibling-repo dispatch
+- alternative bridge backbones such as Qwen/Gemma
+- old Omni training/integrated model classes
+- old dataset loader code
+- the LLaVA tree
+- the legacy SANA inference script
+
+That is why the repo is smaller and easier to trace than the training repo.
+
+## 7. Minimal reading order
+
+If someone new needs to understand the repo quickly, read in this order:
+
+1. `README.md`
+2. `generate.py`
+3. `tools/inference/test_q1_student_video.py`
+4. `nets/omni/modules/sana_prompt_bridge.py`
+5. `tools/inference/sana_video_inference_fixed.py`
+6. `understand.py`
+7. `nets/smolvlm2/architecture_smolvlm2.py`
+
+That order gives the shortest path from CLI to model internals.

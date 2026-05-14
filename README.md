@@ -1,101 +1,118 @@
-# Mobile-OV Infer Clean
+# Mobile-OV Clean Infer
 
-This repository is a self-contained inference repo for:
+This repository is a **self-contained inference repo** for two things:
 
-- video and image generation
-- image and video understanding
+- Mobile-OV generation
+- SmolVLM2 understanding
 
-It is intentionally separated from the main training repo so we can run simple,
-repeatable inference commands without mixing them with training scripts,
-manifests, or experiment notes. Unlike the first thin-wrapper version, this
-repo now vendors the Mobile-OV generation stack locally so it does not need a
-second sibling checkout to run.
+It is intentionally separate from the training repo. The goal here is not to
+carry every research branch. The goal is to keep one small codebase that an
+engineer can:
 
-Architecture overview:
+- run under SLURM
+- read end to end
+- trace from CLI entrypoint to model code
+- use as a starting point for porting to another runtime such as mobile or
+  TensorFlow
+
+The clean repo therefore makes a few strong choices:
+
+- one active generation path: **SmolVLM2 -> lexical-gated Mobile-OV bridge -> SANA-video**
+- one active understanding path: **local SmolVLM2 PyTorch model**
+- no sibling-repo dependency
+- no `python -m mobileov_infer...` wrapper package
+- no alternative bridge backbones such as Gemma/Qwen in the active path
+
+Architecture and file map:
 
 - [ARCHITECTURE.md](ARCHITECTURE.md)
 
-For understanding, this repo uses the Hugging Face
-`HuggingFaceTB/SmolVLM2-500M-Video-Instruct` model directly, so that video
-understanding stays simple and independent from the custom generation path.
-
-## Important cluster rule
-
-On the H200 machine, all GPU work must go through SLURM.
-
-Do **not** run CUDA Python directly from a normal SSH shell.
-
 ## Environment
 
-This repo assumes you reuse the working Mobile-OV inference environment instead
-of building a separate clean-room environment just for the wrapper.
-
-Recommended environment:
-
 ```bash
-source /share_0/conda/etc/profile.d/conda.sh
-conda activate mobileov
+source scripts/activate_mobileov.sh
 ```
 
-One-time extra dependency for SmolVLM2 multimodal understanding:
+If your environment is missing the SmolVLM2 processor dependency:
 
 ```bash
 python -m pip install num2words
 ```
 
-Quick sanity checks:
+## Important cluster rule
 
-```bash
-python -m mobileov_infer.generate --help
-python -m mobileov_infer.understand --help
-```
+On the H200 cluster, all GPU work must go through SLURM.
 
-Optional local code sanity check:
-
-```bash
-python -m py_compile \
-  mobileov_infer/*.py \
-  tools/inference/*.py
-```
+Do not run CUDA Python directly from a normal SSH shell.
 
 ## Quick start
 
-From this repo:
+Request one debug GPU and open `tmux` inside the allocation:
 
 ```bash
 bash scripts/request_debug_tmux.sh
 ```
 
-That requests one debug GPU and opens a `tmux` session inside the allocation.
-
-Inside that tmux session, you can run:
+Inside that tmux session:
 
 ```bash
-source /share_0/conda/etc/profile.d/conda.sh
-conda activate mobileov
+source scripts/activate_mobileov.sh
 bash scripts/smoke_test.sh
 ```
 
+Why use the helper script?
+
+- it activates the `mobileov` env by name
+- it re-prepends `"$CONDA_PREFIX/bin"` to `PATH`
+- that avoids a tmux-specific shell quirk where `python` can still point at the
+  base conda install even after `conda activate`
+
 The smoke test:
 
-1. generates one short video
-2. runs SmolVLM2 understanding on that video
+1. generates one short video with Mobile-OV
+2. runs local SmolVLM2 understanding on that video
 
 Current smoke-test defaults:
 
 - generation steps: `24`
 - cfg scale: `6.0`
-- generation frames: `17`
+- generation frames: `9`
 
-Outputs go to:
+The smoke test is intentionally lighter than a normal benchmark run. It is
+meant to verify that:
+
+- the generation path still works end to end
+- the understanding path still works end to end
+- SLURM + tmux workflow is healthy
+
+By default it looks for repo-local weights under `omni_ckpts/`. If your weights
+live elsewhere, override them explicitly:
 
 ```bash
-output/smoke_YYYYMMDD_HHMMSS
+CHECKPOINT=/abs/path/to/mobileov.pt \
+SANA_CHECKPOINT_DIR=/abs/path/to/sana_video_2b_480p \
+SMOLVLM2_CKPT_PATH=/abs/path/to/smolvlm2_500m.pt \
+bash scripts/smoke_test.sh
+```
+
+Outputs are written under:
+
+```text
+output/smoke_YYYYMMDD_HHMMSS/
 ```
 
 ## Generation
 
-Simple example:
+User-facing entrypoint:
+
+```bash
+python generate.py \
+  --prompt "a golden retriever running along a beach at sunset" \
+  --num-frames 81 \
+  --output-dir output/demo_generation
+```
+
+Shell convenience wrapper:
 
 ```bash
 bash scripts/generate.sh \
@@ -104,7 +121,7 @@ bash scripts/generate.sh \
   --output-dir output/demo_generation
 ```
 
-Default generation settings in the clean repo:
+Default generation settings:
 
 - steps: `24`
 - cfg scale: `6.0`
@@ -114,7 +131,7 @@ Default generation settings in the clean repo:
 Useful overrides:
 
 ```bash
-bash scripts/generate.sh \
+python generate.py \
   --checkpoint /abs/path/to/checkpoint.pt \
   --steps 24 \
   --cfg-scale 6.0 \
@@ -125,17 +142,50 @@ bash scripts/generate.sh \
 
 Default generation checkpoint:
 
-```bash
+```text
 omni_ckpts/hf_mobile_ov/stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt
 ```
 
-You can override it with:
+## Understanding
+
+User-facing entrypoint:
 
 ```bash
-export MOBILEOV_GENERATION_CKPT=/abs/path/to/another_checkpoint.pt
+python understand.py \
+  --video /abs/path/to/video.mp4 \
+  --prompt "Describe the video in 2-3 sentences."
 ```
 
-Expected local checkpoint layout for the default generation path:
+Text-only:
+
+```bash
+python understand.py \
+  --prompt "Write a short poem about the moon."
+```
+
+Image understanding:
+
+```bash
+python understand.py \
+  --image /abs/path/to/image.png \
+  --prompt "Describe this image in detail."
+```
+
+Important note:
+
+- the **understanding model itself** is local PyTorch code in `nets/smolvlm2/`
+- `transformers` is still used for tokenizer/processor convenience
+- the repo does **not** use `AutoModel...` as the model runtime
+- this means engineers can inspect the model implementation locally instead of
+  treating the model as a black box hidden inside a library
+
+Default local SmolVLM2 checkpoint:
+
+```text
+omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt
+```
+
+## Expected checkpoint layout
 
 ```text
 omni_ckpts/
@@ -148,51 +198,25 @@ omni_ckpts/
     smolvlm2_500m.pt
 ```
 
-If you keep checkpoints elsewhere, pass `--checkpoint` or set
-`MOBILEOV_GENERATION_CKPT`.
-
-## Understanding
-
-Text-only:
+If your checkpoints live elsewhere, pass them explicitly:
 
 ```bash
-bash scripts/understand.sh \
-  --prompt "Write a short poem about the moon."
+python generate.py --checkpoint /abs/path/to/mobileov.pt ...
+python understand.py --ckpt-path /abs/path/to/smolvlm2_500m.pt ...
 ```
 
-Image understanding:
+## Active code surface
 
-```bash
-bash scripts/understand.sh \
-  --image /abs/path/to/image.png \
-  --prompt "Describe this image in detail."
-```
+If you only want to understand the repo, start here:
 
-Video understanding:
+- `generate.py`
+- `understand.py`
+- `tools/inference/test_q1_student_video.py`
+- `tools/inference/sana_video_inference_fixed.py`
+- `nets/omni/modules/sana_prompt_bridge.py`
+- `nets/omni/modules/adapter.py`
+- `nets/omni/modules/smolvlm2_vision_head.py`
+- `nets/smolvlm2/`
 
-```bash
-bash scripts/understand.sh \
-  --video /abs/path/to/video.mp4 \
-  --prompt "Describe the video in 2-3 sentences."
-```
-
-Default SmolVLM2 checkpoint:
-
-```bash
-HuggingFaceTB/SmolVLM2-500M-Video-Instruct
-```
-
-If your environment is missing the processor dependency used by SmolVLM2, install:
-
-```bash
-python -m pip install num2words
-```
-
-## Notes
-
-- Run this repo from a shared filesystem path such as `/share_X/users/$USER`.
-- The wrappers automatically set `PYTHONNOUSERSITE=1`.
-- The wrappers automatically set `PYTHONPATH` to this repo root before
-  invoking the local generation backend code.
-- The repo is self-contained at the code level, but it still expects model
-  checkpoints to exist locally or be passed by path.
+Everything else exists only because the active path still needs it at runtime,
+most notably the vendored SANA diffusion stack under `nets/third_party/sana/`.

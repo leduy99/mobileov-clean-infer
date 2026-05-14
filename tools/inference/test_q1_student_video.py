@@ -10,7 +10,6 @@ Quick path:
 """
 
 import argparse
-import importlib
 import os
 import random
 from datetime import datetime
@@ -21,20 +20,16 @@ import torch
 import torch.nn.functional as F
 
 from nets.omni.modules.sana_prompt_bridge import SanaPromptBridge
-from nets.omni.modules.sana_prompt_bridge_gemma4 import Gemma4SanaPromptBridge
-from nets.omni.modules.sana_prompt_bridge_qwen3vl import Qwen3VLSanaPromptBridge
 from nets.third_party.sana.diffusion.longsana.utils.model_wrapper import SanaTextEncoder
 from tools.inference.runtime_helpers import apply_lora_to_module, preprocess_prompts, to_attrdict
 from diffusion.model.utils import prepare_prompt_ar
 from diffusion.data.datasets import utils as sana_dataset_utils
 
 
-def _load_sana_inference_backend(backend_name: str):
-    if backend_name == "legacy":
-        return importlib.import_module("tools.inference.sana_video_inference")
-    if backend_name == "fixed":
-        return importlib.import_module("tools.inference.sana_video_inference_fixed")
-    raise ValueError(f"Unsupported SANA backend: {backend_name}")
+def _load_sana_inference_backend():
+    from tools.inference import sana_video_inference_fixed
+
+    return sana_video_inference_fixed
 
 
 def _get_base_ratios(config, height, width):
@@ -49,25 +44,18 @@ def _get_base_ratios(config, height, width):
     return base_ratios
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Q1 student prompt embedding video test")
     parser.add_argument(
         "--sana-backend",
         type=str,
         default="fixed",
-        choices=["legacy", "fixed"],
-        help="Choose SANA inference backend module. Use 'fixed' unless you are intentionally debugging legacy sampling.",
+        choices=["fixed"],
+        help="SANA backend used by the clean repo. Only the fixed path is supported.",
     )
     parser.add_argument("--csv-path", type=str, default="data/openvid_q1/OpenVid_prompt_subset.csv")
     parser.add_argument("--prompt-index", type=int, default=0, help="Prompt index in CSV")
     parser.add_argument("--prompt", type=str, default=None, help="Direct prompt text (overrides CSV)")
-    parser.add_argument(
-        "--backbone-type",
-        type=str,
-        default=os.environ.get("STUDENT_BACKBONE_TYPE", "smolvlm2"),
-        choices=["smolvlm2", "qwen3_vl", "qwen3vl", "qwen", "gemma4", "gemma_4"],
-        help="Student text backbone type used by the bridge.",
-    )
     parser.add_argument(
         "--smolvlm2-ckpt-path",
         type=str,
@@ -151,18 +139,12 @@ def main():
         action="store_true",
         help="Force dual-text inference: native SANA text as main branch, student bridge as auxiliary branch.",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     default_num_frames = int(parser.get_default("num_frames"))
 
     device = torch.device(args.device)
     dtype = torch.bfloat16 if args.dtype == "bf16" else torch.float32
-    sana_backend = _load_sana_inference_backend(args.sana_backend)
-    runtime_backend = sana_backend
-    if args.sana_backend == "legacy":
-        # Loader from old script is brittle with current registry/config layout.
-        # Keep legacy sampler path, but use fixed backend for robust model bootstrap.
-        runtime_backend = _load_sana_inference_backend("fixed")
-        print("WARNING: using legacy sampling path for debugging only; current results may be unreliable.")
+    runtime_backend = _load_sana_inference_backend()
     print(f"SANA backend: {args.sana_backend}")
     print(
         "Infer request: backend=%s device=%s dtype=%s seed=%d steps=%d cfg_scale=%.4f "
@@ -384,13 +366,6 @@ def main():
         mcp_num_fuse_layers = 2
 
     # Student embeddings via bridge
-    backbone_type = str(args.backbone_type or "smolvlm2").lower()
-    if backbone_type in {"qwen3_vl", "qwen3vl", "qwen"}:
-        bridge_cls = Qwen3VLSanaPromptBridge
-    elif backbone_type in {"gemma4", "gemma_4"}:
-        bridge_cls = Gemma4SanaPromptBridge
-    else:
-        bridge_cls = SanaPromptBridge
     bridge_kwargs = dict(
         adapter_ckpt_dir=args.adapter_ckpt_dir,
         adapter_in_channels=args.adapter_in_channels,
@@ -426,28 +401,15 @@ def main():
         sana_chi_prompt=chi_prompt_text,
         tokenizer_model_id=args.tokenizer_model_id,
     )
-    if bridge_cls is SanaPromptBridge:
-        bridge_kwargs.update(
-            smolvlm2_ckpt_path=args.smolvlm2_ckpt_path,
-            smol_vh_num_queries=1,
-            lora_enable=lora_enable,
-            lora_r=lora_r,
-            lora_alpha=lora_alpha,
-            lora_dropout=args.lora_dropout,
-        )
-    elif bridge_cls is Qwen3VLSanaPromptBridge:
-        bridge_kwargs.update(
-            qwen_ckpt_path=args.smolvlm2_ckpt_path,
-            gate_min_value=0.0,
-            lora_enable=False,
-        )
-    else:
-        bridge_kwargs.update(
-            gemma_ckpt_path=args.smolvlm2_ckpt_path,
-            gate_min_value=0.0,
-            lora_enable=False,
-        )
-    bridge = bridge_cls(**bridge_kwargs)
+    bridge_kwargs.update(
+        smolvlm2_ckpt_path=args.smolvlm2_ckpt_path,
+        smol_vh_num_queries=1,
+        lora_enable=lora_enable,
+        lora_r=lora_r,
+        lora_alpha=lora_alpha,
+        lora_dropout=args.lora_dropout,
+    )
+    bridge = SanaPromptBridge(**bridge_kwargs)
     bridge_tokenizer = bridge._get_tokenizer()
     bridge_tokenizer_cls = type(bridge_tokenizer).__name__
     bridge_tokenizer_mod = type(bridge_tokenizer).__module__
@@ -841,72 +803,35 @@ def main():
     )
     print(f"Prompt text: {prompt_plain}")
 
-    if args.sana_backend == "legacy":
-        # Legacy path mirrors old sana_video_inference.py behavior.
-        torch.manual_seed(args.seed)
-        np.random.seed(args.seed)
-        with torch.no_grad():
-            latents = sana_backend.simple_flow_matching_sampling(
-                models["diffusion_model"],
-                text_embeddings,
-                latent_shape,
-                num_steps=args.steps,
-                device=str(device),
-                dtype=dtype,
-                cfg_scale=args.cfg_scale,
-                flow_shift=infer_flow_shift,
-            )
-    else:
-        generator = torch.Generator(device=device).manual_seed(args.seed)
-        latents = torch.randn(latent_shape, device=device, dtype=dtype, generator=generator)
-        latents = sana_backend.flow_matching_sampling(
-            models["diffusion_model"],
-            latents,
-            text_embeddings,
-            negative_embeddings,
-            num_steps=args.steps,
-            device=str(device),
-            cfg_scale=args.cfg_scale,
-            flow_shift=infer_flow_shift,
-            model_kwargs=model_kwargs,
-            sampling_algo=sampling_algo,
-        )
+    generator = torch.Generator(device=device).manual_seed(args.seed)
+    latents = torch.randn(latent_shape, device=device, dtype=dtype, generator=generator)
+    latents = runtime_backend.flow_matching_sampling(
+        models["diffusion_model"],
+        latents,
+        text_embeddings,
+        negative_embeddings,
+        num_steps=args.steps,
+        device=str(device),
+        cfg_scale=args.cfg_scale,
+        flow_shift=infer_flow_shift,
+        model_kwargs=model_kwargs,
+        sampling_algo=sampling_algo,
+    )
 
     # Decode
     vae_type = config.vae.vae_type
-    if args.sana_backend == "legacy":
-        latents = latents.to(models.get("vae_dtype", latents.dtype))
-        with torch.no_grad():
-            decoded = runtime_backend.vae_decode(vae_type, models["vae"], latents)
-        if isinstance(decoded, list):
-            decoded = torch.stack(decoded, dim=0)
-        if decoded.ndim == 5:
-            # [B, C, T, H, W] -> [C, T, H, W]
-            decoded = decoded[0]
-        if decoded.ndim == 4 and decoded.shape[0] in (1, 3):
-            # [C, T, H, W] -> [T, H, W, C]
-            video = decoded.permute(1, 2, 3, 0).cpu().numpy()
-        elif decoded.ndim == 4 and decoded.shape[1] in (1, 3):
-            # [T, C, H, W] -> [T, H, W, C]
-            video = decoded.permute(0, 2, 3, 1).cpu().numpy()
-        else:
-            raise RuntimeError(f"Unexpected legacy decode output shape: {tuple(decoded.shape)}")
-        video = (video + 1.0) / 2.0
-        video = np.clip(video, 0, 1)
-        video = (video * 255).astype(np.uint8)
-    else:
-        latents = latents.to(models.get("vae_dtype", latents.dtype))
-        video = models["vae"].decode(latents) if hasattr(models["vae"], "decode") else None
-        if video is None:
-            from diffusion.model.builder import vae_decode
+    latents = latents.to(models.get("vae_dtype", latents.dtype))
+    video = models["vae"].decode(latents) if hasattr(models["vae"], "decode") else None
+    if video is None:
+        from diffusion.model.builder import vae_decode
 
-            video = vae_decode(vae_type, models["vae"], latents)
-        if isinstance(video, list):
-            video = torch.stack(video, dim=0)
-        video = video[0].permute(1, 2, 3, 0).cpu().numpy()
-        video = (video + 1.0) / 2.0
-        video = np.clip(video, 0, 1)
-        video = (video * 255).astype(np.uint8)
+        video = vae_decode(vae_type, models["vae"], latents)
+    if isinstance(video, list):
+        video = torch.stack(video, dim=0)
+    video = video[0].permute(1, 2, 3, 0).cpu().numpy()
+    video = (video + 1.0) / 2.0
+    video = np.clip(video, 0, 1)
+    video = (video * 255).astype(np.uint8)
 
     os.makedirs(args.output_dir, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -924,7 +849,8 @@ def main():
         out_path = os.path.join(args.output_dir, f"q1_student_{timestamp}_{safe_prompt[:40]}.mp4")
         runtime_backend.save_video(video, out_path, fps=16)
         print(f"Saved video to: {out_path}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
