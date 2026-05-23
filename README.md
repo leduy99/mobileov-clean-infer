@@ -83,7 +83,7 @@ If the checkpoint is hosted on Hugging Face, the equivalent download command is:
 
 ```bash
 mkdir -p omni_ckpts/hf_mobile_ov
-huggingface-cli download <org-or-user>/<repo> mobile_ov_135k_full.pt \
+huggingface-cli download leduy99/Mobile-OV mobile_ov_135k_full.pt \
   --local-dir omni_ckpts/hf_mobile_ov
 ```
 
