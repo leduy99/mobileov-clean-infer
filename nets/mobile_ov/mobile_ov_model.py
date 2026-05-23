@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +49,8 @@ if TYPE_CHECKING:
 
 TOKENIZER_MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 VIDEO_BACKBONE_CONFIG_PATH = "configs/video_backbone_config/Sana_2000M_480px_AdamW_fsdp.yaml"
+MOBILE_OV_BUNDLE_FORMAT = "mobile_ov_bundle_v1"
+MOBILE_OV_FULL_CHECKPOINT_FORMAT = "mobile_ov_full_checkpoint_v1"
 
 
 @dataclass(frozen=True)
@@ -94,7 +98,7 @@ def default_generation_ckpt() -> Path:
         REPO_ROOT
         / "omni_ckpts"
         / "hf_mobile_ov"
-        / "stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt"
+        / "mobile_ov_135k_full.pt"
     )
 
 
@@ -160,6 +164,8 @@ class MobileOVModel(nn.Module):
             resolve_path(video_backbone_checkpoint_dir) or default_video_backbone_checkpoint_dir().resolve()
         )
         self.smolvlm2_ckpt_path = resolve_path(smolvlm2_ckpt_path) or default_smolvlm2_ckpt().resolve()
+        self._embedded_smolvlm2_ckpt_path: Path | None = None
+        self._uses_full_checkpoint = False
 
         self.bridge: "MobileOVBridge | None" = None
         self.video_diffusion_model: nn.Module | None = None
@@ -175,15 +181,15 @@ class MobileOVModel(nn.Module):
 
         if not self.generation_ckpt_path.exists():
             raise FileNotFoundError(f"Generation checkpoint not found: {self.generation_ckpt_path}")
+
+        student_state, dit_state = self._load_checkpoint_bundle(self.generation_ckpt_path)
         if not self.video_backbone_checkpoint_dir.is_dir():
             raise FileNotFoundError(
                 f"Video backbone checkpoint directory not found: {self.video_backbone_checkpoint_dir}"
             )
-        if not self.smolvlm2_ckpt_path.exists():
-            raise FileNotFoundError(f"SmolVLM2 checkpoint not found: {self.smolvlm2_ckpt_path}")
 
         self._runtime = self._load_video_backbone_runtime()
-        student_state, dit_state = self._load_checkpoint_bundle(self.generation_ckpt_path)
+        self._ensure_smolvlm2_checkpoint_available()
         projector_state = student_state["projector"]
 
         self._video_config = self._runtime.load_config_file(VIDEO_BACKBONE_CONFIG_PATH)
@@ -216,8 +222,7 @@ class MobileOVModel(nn.Module):
         if self.understanding_model is not None:
             return self
 
-        if not self.smolvlm2_ckpt_path.exists():
-            raise FileNotFoundError(f"SmolVLM2 checkpoint not found: {self.smolvlm2_ckpt_path}")
+        self._ensure_smolvlm2_checkpoint_available()
 
         self.understanding_model = load_smolvlm2_from_ckpt(
             str(self.smolvlm2_ckpt_path),
@@ -442,6 +447,7 @@ class MobileOVModel(nn.Module):
         checkpoint = torch.load(str(bridge_ckpt), map_location="cpu")
         if not isinstance(checkpoint, dict):
             raise RuntimeError("Expected a dict checkpoint for Mobile-OV generation.")
+        checkpoint = self._unwrap_mobile_ov_bundle(checkpoint, bridge_ckpt, materialize_video_backbone=True)
 
         student_state = checkpoint.get("student_state", checkpoint)
         infer_hints = checkpoint.get("infer_hints", {}) or {}
@@ -455,6 +461,156 @@ class MobileOVModel(nn.Module):
 
         self._assert_supported_checkpoint(student_state, infer_hints, dit_state)
         return student_state, dit_state
+
+    def _unwrap_mobile_ov_bundle(
+        self,
+        checkpoint: dict,
+        bundle_path: Path,
+        *,
+        materialize_video_backbone: bool,
+    ) -> dict:
+        checkpoint_format = checkpoint.get("format")
+        if checkpoint_format not in {MOBILE_OV_BUNDLE_FORMAT, MOBILE_OV_FULL_CHECKPOINT_FORMAT}:
+            return checkpoint
+
+        mobile_ov_checkpoint = checkpoint.get("mobile_ov_checkpoint")
+        if not isinstance(mobile_ov_checkpoint, dict):
+            raise RuntimeError("Mobile-OV checkpoint bundle is missing a dict 'mobile_ov_checkpoint'.")
+
+        smolvlm2_bytes = checkpoint.get("smolvlm2_checkpoint_bytes")
+        if not isinstance(smolvlm2_bytes, (bytes, bytearray)):
+            raise RuntimeError("Mobile-OV checkpoint bundle is missing embedded 'smolvlm2_checkpoint_bytes'.")
+
+        tokenizer_assets = checkpoint.get("tokenizer_assets")
+        if isinstance(tokenizer_assets, dict):
+            tokenizer_dir = self._materialize_embedded_tokenizer_assets(
+                tokenizer_assets,
+                bundle_path=bundle_path,
+            )
+            self.tokenizer_model_id = str(tokenizer_dir)
+            LOGGER.info("Using tokenizer/processor assets embedded in checkpoint: %s", tokenizer_dir)
+
+        self._embedded_smolvlm2_ckpt_path = self._materialize_embedded_smolvlm2(
+            bytes(smolvlm2_bytes),
+            bundle_path=bundle_path,
+        )
+        self.smolvlm2_ckpt_path = self._embedded_smolvlm2_ckpt_path
+        LOGGER.info("Using SmolVLM2 checkpoint embedded in bundle: %s", self.smolvlm2_ckpt_path)
+
+        if checkpoint_format == MOBILE_OV_FULL_CHECKPOINT_FORMAT and materialize_video_backbone:
+            self.video_backbone_checkpoint_dir = self._materialize_embedded_video_backbone(
+                checkpoint,
+                bundle_path=bundle_path,
+            )
+            self._uses_full_checkpoint = True
+            LOGGER.info("Using video backbone embedded in full Mobile-OV checkpoint: %s", self.video_backbone_checkpoint_dir)
+
+        return mobile_ov_checkpoint
+
+    def _materialize_embedded_smolvlm2(self, checkpoint_bytes: bytes, *, bundle_path: Path) -> Path:
+        digest = hashlib.sha256(checkpoint_bytes).hexdigest()[:16]
+        cache_root = Path(os.environ.get("MOBILEOV_BUNDLE_CACHE", Path.home() / ".cache" / "mobile_ov" / "bundles"))
+        cache_root.mkdir(parents=True, exist_ok=True)
+        target = cache_root / f"{bundle_path.stem}_{digest}_smolvlm2.pt"
+        if target.exists() and target.stat().st_size == len(checkpoint_bytes):
+            return target
+
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        tmp.write_bytes(checkpoint_bytes)
+        tmp.replace(target)
+        return target
+
+    def _materialize_embedded_video_backbone(self, checkpoint: dict, *, bundle_path: Path) -> Path:
+        video_backbone = checkpoint.get("video_backbone")
+        if not isinstance(video_backbone, dict):
+            raise RuntimeError("Full Mobile-OV checkpoint is missing a dict 'video_backbone'.")
+
+        diffusion_checkpoint = video_backbone.get("diffusion_checkpoint")
+        vae_checkpoint = video_backbone.get("vae_checkpoint")
+        if not isinstance(diffusion_checkpoint, dict):
+            raise RuntimeError("Full Mobile-OV checkpoint is missing 'video_backbone.diffusion_checkpoint'.")
+        if not isinstance(vae_checkpoint, dict):
+            raise RuntimeError("Full Mobile-OV checkpoint is missing 'video_backbone.vae_checkpoint'.")
+
+        digest = str(video_backbone.get("digest") or hashlib.sha256(str(bundle_path).encode()).hexdigest()[:16])
+        cache_root = Path(os.environ.get("MOBILEOV_BUNDLE_CACHE", Path.home() / ".cache" / "mobile_ov" / "bundles"))
+        target_dir = cache_root / f"{bundle_path.stem}_{digest}_video_backbone"
+        diffusion_rel = Path(str(video_backbone.get("diffusion_filename", "checkpoints/SANA_Video_2B_480p.pth")))
+        vae_rel = Path(str(video_backbone.get("vae_filename", "vae/Wan2.1_VAE.pth")))
+        diffusion_path = target_dir / diffusion_rel
+        vae_path = target_dir / vae_rel
+        manifest_path = target_dir / ".mobile_ov_full_checkpoint.json"
+
+        expected_manifest = {
+            "format": MOBILE_OV_FULL_CHECKPOINT_FORMAT,
+            "digest": digest,
+            "diffusion_filename": str(diffusion_rel),
+            "vae_filename": str(vae_rel),
+        }
+        if diffusion_path.exists() and vae_path.exists() and manifest_path.exists():
+            try:
+                if json.loads(manifest_path.read_text()) == expected_manifest:
+                    return target_dir
+            except json.JSONDecodeError:
+                pass
+
+        diffusion_path.parent.mkdir(parents=True, exist_ok=True)
+        vae_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(diffusion_checkpoint, str(diffusion_path))
+        torch.save(vae_checkpoint, str(vae_path))
+        manifest_path.write_text(json.dumps(expected_manifest, indent=2, sort_keys=True))
+        return target_dir
+
+    def _materialize_embedded_tokenizer_assets(self, tokenizer_assets: dict, *, bundle_path: Path) -> Path:
+        files = tokenizer_assets.get("files")
+        if not isinstance(files, dict) or not files:
+            raise RuntimeError("Embedded tokenizer assets are missing a non-empty 'files' dict.")
+
+        digest = str(tokenizer_assets.get("digest") or hashlib.sha256(str(sorted(files)).encode()).hexdigest()[:16])
+        cache_root = Path(os.environ.get("MOBILEOV_BUNDLE_CACHE", Path.home() / ".cache" / "mobile_ov" / "bundles"))
+        target_dir = cache_root / f"{bundle_path.stem}_{digest}_tokenizer"
+        manifest_path = target_dir / ".mobile_ov_tokenizer_assets.json"
+        expected_manifest = {
+            "format": MOBILE_OV_FULL_CHECKPOINT_FORMAT,
+            "digest": digest,
+            "files": sorted(files.keys()),
+        }
+        if target_dir.exists() and manifest_path.exists():
+            try:
+                if json.loads(manifest_path.read_text()) == expected_manifest:
+                    return target_dir
+            except json.JSONDecodeError:
+                pass
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for relative_name, raw_bytes in files.items():
+            if not isinstance(raw_bytes, (bytes, bytearray)):
+                raise RuntimeError(f"Tokenizer asset {relative_name!r} is not stored as bytes.")
+            relative_path = Path(str(relative_name))
+            if relative_path.is_absolute() or ".." in relative_path.parts:
+                raise RuntimeError(f"Unsafe tokenizer asset path: {relative_name!r}")
+            output_path = target_dir / relative_path
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(bytes(raw_bytes))
+        manifest_path.write_text(json.dumps(expected_manifest, indent=2, sort_keys=True))
+        return target_dir
+
+    def _ensure_smolvlm2_checkpoint_available(self) -> None:
+        if self.smolvlm2_ckpt_path.exists():
+            return
+        if self.generation_ckpt_path.exists():
+            checkpoint = torch.load(str(self.generation_ckpt_path), map_location="cpu")
+            if isinstance(checkpoint, dict) and checkpoint.get("format") in {
+                MOBILE_OV_BUNDLE_FORMAT,
+                MOBILE_OV_FULL_CHECKPOINT_FORMAT,
+            }:
+                self._unwrap_mobile_ov_bundle(
+                    checkpoint,
+                    self.generation_ckpt_path,
+                    materialize_video_backbone=False,
+                )
+                return
+        raise FileNotFoundError(f"SmolVLM2 checkpoint not found: {self.smolvlm2_ckpt_path}")
 
     def _assert_supported_checkpoint(self, student_state: dict, infer_hints: dict, dit_state: dict) -> None:
         unsupported = []
@@ -472,7 +628,7 @@ class MobileOVModel(nn.Module):
         projector_state = student_state.get("projector", {})
         if not isinstance(projector_state, dict) or not projector_state:
             raise RuntimeError("This repo expects a projector state for the lexical-gated bridge.")
-        if not dit_state:
+        if not dit_state and not self._uses_full_checkpoint:
             raise RuntimeError("This repo expects a non-empty dit_trainable_state for full-DiT inference.")
         if unsupported:
             raise RuntimeError(
@@ -542,6 +698,10 @@ class MobileOVModel(nn.Module):
             raise RuntimeError(
                 f"Unexpected projector load mismatch: missing={len(missing)} unexpected={len(unexpected)}"
             )
+
+        if self._uses_full_checkpoint and not dit_state:
+            LOGGER.info("Full Mobile-OV checkpoint already contains merged DiT weights; skipping delta load.")
+            return
 
         missing, unexpected = diffusion_model.load_state_dict(dit_state, strict=False)
         loaded = max(0, len(dit_state) - len(unexpected))

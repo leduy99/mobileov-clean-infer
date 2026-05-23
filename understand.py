@@ -5,11 +5,17 @@ import argparse
 import logging
 import os
 
-from nets.mobile_ov import MobileOVModel, default_smolvlm2_ckpt
+from nets.mobile_ov import MobileOVModel, default_generation_ckpt, default_smolvlm2_ckpt
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Mobile-OV understanding")
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=os.environ.get("MOBILEOV_GENERATION_CKPT", str(default_generation_ckpt())),
+        help="Optional Mobile-OV full/bundled checkpoint. Used to extract embedded SmolVLM2 if needed.",
+    )
     parser.add_argument(
         "--ckpt-path",
         type=str,
@@ -40,6 +46,7 @@ def main() -> int:
     args = parse_args()
 
     model = MobileOVModel(
+        generation_ckpt_path=args.checkpoint,
         smolvlm2_ckpt_path=args.ckpt_path,
         tokenizer_model_id=args.tokenizer_model_id,
         device=args.device,

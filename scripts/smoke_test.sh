@@ -9,9 +9,7 @@ STAMP=$(date +%Y%m%d_%H%M%S)
 OUT_DIR=${OUT_DIR:-"$REPO_ROOT/output/smoke_${STAMP}"}
 GENERATED_DIR="${OUT_DIR}/generated"
 UNDERSTAND_TXT="${OUT_DIR}/understanding.txt"
-DEFAULT_GENERATION_CKPT="$REPO_ROOT/omni_ckpts/hf_mobile_ov/stage1_joint_openvid_fullmobile_o_fulldit_diffonly_initlatest_bs64_v2_20260429_8gpu_60k.pt"
-DEFAULT_VIDEO_BACKBONE_CHECKPOINT_DIR="$REPO_ROOT/omni_ckpts/sana_video_2b_480p"
-DEFAULT_SMOLVLM2_CKPT="$REPO_ROOT/omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt"
+DEFAULT_GENERATION_CKPT="$REPO_ROOT/omni_ckpts/hf_mobile_ov/mobile_ov_135k_full.pt"
 
 PROMPT=${PROMPT:-"a golden retriever running along a beach at sunset"}
 QUESTION=${QUESTION:-"Describe the video in 2-3 sentences."}
@@ -19,24 +17,10 @@ STEPS=${STEPS:-24}
 CFG_SCALE=${CFG_SCALE:-6.0}
 NUM_FRAMES=${NUM_FRAMES:-9}
 CHECKPOINT=${CHECKPOINT:-"$DEFAULT_GENERATION_CKPT"}
-VIDEO_BACKBONE_CHECKPOINT_DIR=${VIDEO_BACKBONE_CHECKPOINT_DIR:-"$DEFAULT_VIDEO_BACKBONE_CHECKPOINT_DIR"}
-SMOLVLM2_CKPT_PATH=${SMOLVLM2_CKPT_PATH:-"$DEFAULT_SMOLVLM2_CKPT"}
 
 if [[ ! -f "$CHECKPOINT" ]]; then
   echo "Generation checkpoint not found: $CHECKPOINT" >&2
-  echo "Either copy weights into repo-local omni_ckpts/ or export CHECKPOINT=/abs/path/to/mobileov.pt" >&2
-  exit 1
-fi
-
-if [[ ! -d "$VIDEO_BACKBONE_CHECKPOINT_DIR" ]]; then
-  echo "Video backbone checkpoint directory not found: $VIDEO_BACKBONE_CHECKPOINT_DIR" >&2
-  echo "Either copy weights into repo-local omni_ckpts/ or export VIDEO_BACKBONE_CHECKPOINT_DIR=/abs/path/to/video_backbone_ckpts" >&2
-  exit 1
-fi
-
-if [[ ! -f "$SMOLVLM2_CKPT_PATH" ]]; then
-  echo "SmolVLM2 checkpoint not found: $SMOLVLM2_CKPT_PATH" >&2
-  echo "Either copy weights into repo-local omni_ckpts/ or export SMOLVLM2_CKPT_PATH=/abs/path/to/smolvlm2_500m.pt" >&2
+  echo "Copy the full Mobile-OV checkpoint into repo-local omni_ckpts/ or export CHECKPOINT=/abs/path/to/mobile_ov_full.pt" >&2
   exit 1
 fi
 
@@ -53,8 +37,12 @@ GEN_CMD=(
 )
 
 GEN_CMD+=(--checkpoint "$CHECKPOINT")
-GEN_CMD+=(--checkpoint-dir "$VIDEO_BACKBONE_CHECKPOINT_DIR")
-GEN_CMD+=(--smolvlm2-ckpt-path "$SMOLVLM2_CKPT_PATH")
+if [[ -n "${VIDEO_BACKBONE_CHECKPOINT_DIR:-}" ]]; then
+  GEN_CMD+=(--checkpoint-dir "$VIDEO_BACKBONE_CHECKPOINT_DIR")
+fi
+if [[ -n "${SMOLVLM2_CKPT_PATH:-}" ]]; then
+  GEN_CMD+=(--smolvlm2-ckpt-path "$SMOLVLM2_CKPT_PATH")
+fi
 
 "${GEN_CMD[@]}"
 
@@ -65,6 +53,7 @@ if [[ -z "${VIDEO_PATH}" ]]; then
 fi
 
 python understand.py \
+  --checkpoint "$CHECKPOINT" \
   --video "$VIDEO_PATH" \
   --prompt "$QUESTION" \
   --num-frames 8 \

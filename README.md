@@ -52,6 +52,59 @@ On the H200 cluster, all GPU work must go through SLURM.
 
 Do not run CUDA Python directly from a normal SSH shell.
 
+## Use The Full Checkpoint
+
+For normal sharing and conversion, give colleagues this repo plus one checkpoint
+file:
+
+```text
+mobile_ov_135k_full.pt
+```
+
+This file is the complete Mobile-OV inference checkpoint. It includes:
+
+- SmolVLM2 model weights
+- SmolVLM2 tokenizer and processor assets
+- Mobile-OV bridge and lexical gate weights
+- merged video DiT generator weights
+- VAE weights
+
+It does **not** require separate SANA-video or SmolVLM2 checkpoint files at
+inference time.
+
+Recommended local layout:
+
+```bash
+mkdir -p omni_ckpts/hf_mobile_ov
+cp /path/to/mobile_ov_135k_full.pt omni_ckpts/hf_mobile_ov/mobile_ov_135k_full.pt
+```
+
+If the checkpoint is hosted on Hugging Face, the equivalent download command is:
+
+```bash
+mkdir -p omni_ckpts/hf_mobile_ov
+huggingface-cli download <org-or-user>/<repo> mobile_ov_135k_full.pt \
+  --local-dir omni_ckpts/hf_mobile_ov
+```
+
+If the checkpoint is stored elsewhere, pass it explicitly:
+
+```bash
+CHECKPOINT=/abs/path/to/mobile_ov_135k_full.pt bash scripts/smoke_test.sh
+```
+
+The first run extracts the embedded sub-checkpoints into:
+
+```text
+~/.cache/mobile_ov/bundles/
+```
+
+To use a different cache location:
+
+```bash
+export MOBILEOV_BUNDLE_CACHE=/share_4/users/$USER/mobile_ov_cache
+```
+
 ## Quick start
 
 Request one debug GPU and open `tmux` inside the allocation:
@@ -92,14 +145,12 @@ meant to verify that:
 - the understanding path still works end to end
 - SLURM + tmux workflow is healthy
 
-By default it looks for repo-local weights under `omni_ckpts/`. If your weights
-live elsewhere, override them explicitly:
+By default it looks for a repo-local full Mobile-OV checkpoint at
+`omni_ckpts/hf_mobile_ov/mobile_ov_135k_full.pt`. If the checkpoint lives
+elsewhere, override it explicitly:
 
 ```bash
-CHECKPOINT=/abs/path/to/mobileov.pt \
-VIDEO_BACKBONE_CHECKPOINT_DIR=/abs/path/to/sana_video_2b_480p \
-SMOLVLM2_CKPT_PATH=/abs/path/to/smolvlm2_500m.pt \
-bash scripts/smoke_test.sh
+CHECKPOINT=/abs/path/to/mobile_ov_135k_full.pt bash scripts/smoke_test.sh
 ```
 
 Outputs are written under:
@@ -115,17 +166,18 @@ This repo supports one generation architecture only:
 - Mobile-OV lexical-gated bridge
 - SmolVLM2-500M text path
 - video diffusion backbone base model
-- full DiT delta loaded from the Mobile-OV checkpoint
+- merged full-DiT generator weights from the full Mobile-OV checkpoint
 
 That means the generation backend is intentionally **not** a general experiment
 launcher. It is a small, readable implementation of the exact path used by the
-current `60k` joint checkpoint. Research versioning still lives in checkpoint
+current joint full-DiT checkpoint family. Research versioning still lives in checkpoint
 names. The clean repo itself uses the simpler architecture name `Mobile-OV`.
 
 User-facing entrypoint:
 
 ```bash
 python generate.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
   --prompt "a golden retriever running along a beach at sunset" \
   --num-frames 81 \
   --output-dir output/demo_generation
@@ -135,6 +187,7 @@ Shell convenience wrapper:
 
 ```bash
 bash scripts/generate.sh \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
   --prompt "a golden retriever running along a beach at sunset" \
   --num-frames 81 \
   --output-dir output/demo_generation
@@ -151,7 +204,7 @@ Useful overrides:
 
 ```bash
 python generate.py \
-  --checkpoint /abs/path/to/checkpoint.pt \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
   --steps 24 \
   --cfg-scale 6.0 \
   --height 480 \
@@ -164,7 +217,11 @@ Direct Python API:
 ```python
 from nets.mobile_ov import MobileOVModel
 
-model = MobileOVModel(device="cuda:0", dtype="bf16")
+model = MobileOVModel(
+    generation_ckpt_path="/abs/path/to/mobile_ov_135k_full.pt",
+    device="cuda:0",
+    dtype="bf16",
+)
 video_path = model.generate_video(
     prompt="a golden retriever running along a beach at sunset",
     output_dir="output/demo_generation",
@@ -180,6 +237,7 @@ User-facing entrypoint:
 
 ```bash
 python understand.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
   --video /abs/path/to/video.mp4 \
   --prompt "Describe the video in 2-3 sentences."
 ```
@@ -188,6 +246,7 @@ Text-only:
 
 ```bash
 python understand.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
   --prompt "Write a short poem about the moon."
 ```
 
@@ -195,6 +254,7 @@ Image understanding:
 
 ```bash
 python understand.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
   --image /abs/path/to/image.png \
   --prompt "Describe this image in detail."
 ```
@@ -207,10 +267,10 @@ Important note:
 - this means engineers can inspect the model implementation locally instead of
   treating the model as a black box hidden inside a library
 
-Default local SmolVLM2 checkpoint:
+Default full Mobile-OV checkpoint:
 
 ```text
-omni_ckpts/smolvlm2_500m/smolvlm2_500m.pt
+omni_ckpts/hf_mobile_ov/mobile_ov_135k_full.pt
 ```
 
 Direct Python API:
@@ -218,7 +278,11 @@ Direct Python API:
 ```python
 from nets.mobile_ov import MobileOVModel
 
-model = MobileOVModel(device="cuda:0", dtype="bf16")
+model = MobileOVModel(
+    generation_ckpt_path="/abs/path/to/mobile_ov_135k_full.pt",
+    device="cuda:0",
+    dtype="bf16",
+)
 text = model.understand_video(
     video_path="/abs/path/to/video.mp4",
     prompt="Describe the video in 2-3 sentences.",
@@ -228,6 +292,64 @@ print(text)
 ```
 
 ## Expected checkpoint layout
+
+For model conversion, use a complete Mobile-OV checkpoint. This packs SmolVLM2,
+the Mobile-OV bridge, the merged video DiT weights, and the VAE into one `.pt`
+file:
+
+```bash
+python tools/package_mobile_ov_full_checkpoint.py \
+  --mobile-ov-checkpoint /abs/path/to/mobile_ov_135k.pt \
+  --smolvlm2-checkpoint /abs/path/to/smolvlm2_500m.pt \
+  --video-backbone-checkpoint /abs/path/to/SANA_Video_2B_480p.pth \
+  --vae-checkpoint /abs/path/to/Wan2.1_VAE.pth \
+  --tokenizer-assets-dir /abs/path/to/SmolVLM2-500M-Video-Instruct \
+  --output /abs/path/to/mobile_ov_135k_full.pt
+```
+
+Generation can then run from only that checkpoint:
+
+```bash
+python generate.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
+  --prompt "a golden retriever running along a beach at sunset" \
+  --output-dir output/demo_generation
+```
+
+Understanding can use the same full checkpoint to extract the embedded SmolVLM2
+weights:
+
+```bash
+python understand.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_full.pt \
+  --prompt "Describe this video in one sentence." \
+  --video /abs/path/to/video.mp4
+```
+
+For smaller research artifacts, Mobile-OV and SmolVLM2 can also be packaged
+without embedding the public video backbone:
+
+```bash
+python tools/package_mobile_ov_bundle.py \
+  --mobile-ov-checkpoint /abs/path/to/mobile_ov_135k.pt \
+  --smolvlm2-checkpoint /abs/path/to/smolvlm2_500m.pt \
+  --output /abs/path/to/mobile_ov_135k_smolvlm2_bundle.pt
+```
+
+Then generation only needs the bundle plus the public SANA-video backbone:
+
+```bash
+python generate.py \
+  --checkpoint /abs/path/to/mobile_ov_135k_smolvlm2_bundle.pt \
+  --checkpoint-dir /abs/path/to/sana_video_2b_480p \
+  --prompt "a golden retriever running along a beach at sunset" \
+  --output-dir output/demo_generation
+```
+
+That smaller bundle still needs `--checkpoint-dir` because it intentionally does
+not include the video backbone weights.
+
+The legacy unbundled layout is:
 
 ```text
 omni_ckpts/
@@ -243,8 +365,8 @@ omni_ckpts/
 If your checkpoints live elsewhere, pass them explicitly:
 
 ```bash
-python generate.py --checkpoint /abs/path/to/mobileov.pt ...
-python understand.py --ckpt-path /abs/path/to/smolvlm2_500m.pt ...
+python generate.py --checkpoint /abs/path/to/mobile_ov_135k_full.pt ...
+python understand.py --checkpoint /abs/path/to/mobile_ov_135k_full.pt ...
 ```
 
 ## Active code surface

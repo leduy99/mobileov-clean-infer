@@ -216,6 +216,7 @@ def load_backbone_models(
     # Make path absolute
     if not os.path.isabs(vae_path):
         vae_path = os.path.abspath(vae_path)
+    config.vae.vae_pretrained = vae_path
     
     vae = get_vae(
         name=vae_type,
@@ -243,6 +244,7 @@ def load_backbone_models(
     # Make path absolute
     if not os.path.isabs(checkpoint_path):
         checkpoint_path = os.path.abspath(checkpoint_path)
+    config.model.load_from = checkpoint_path
     
     # Build model config
     from diffusion.utils.config import model_video_init_config
